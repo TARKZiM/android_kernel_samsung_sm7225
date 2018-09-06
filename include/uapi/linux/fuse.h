@@ -123,6 +123,7 @@
  *  7.28
  *  - add FUSE_COPY_FILE_RANGE
  *  - add FOPEN_CACHE_DIR
+ *  - add FUSE_MAX_PAGES, add max_pages to init_out
  */
 
 #ifndef _LINUX_FUSE_H
