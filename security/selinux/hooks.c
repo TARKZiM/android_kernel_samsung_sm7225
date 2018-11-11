@@ -1252,33 +1252,6 @@ out_err:
 	kfree(rootcontext);
 	return rc;
 }
-/*
- * string mount options parsing and call set the sbsec
- */
-static int superblock_doinit(struct super_block *sb, void *data)
-{
-	int rc = 0;
-	char *options = data;
-	struct security_mnt_opts opts;
-
-	security_init_mnt_opts(&opts);
-
-	if (!data)
-		goto out;
-
-	BUG_ON(sb->s_type->fs_flags & FS_BINARY_MOUNTDATA);
-
-	rc = selinux_parse_opts_str(options, &opts);
-	if (rc)
-		goto out_err;
-
-out:
-	rc = selinux_set_mnt_opts(sb, &opts, 0, NULL);
-
-out_err:
-	security_free_mnt_opts(&opts);
-	return rc;
-}
 
 static void selinux_write_opts(struct seq_file *m,
 			       struct security_mnt_opts *opts)
@@ -2978,15 +2951,28 @@ out_bad_option:
 
 static int selinux_sb_kern_mount(struct super_block *sb, int flags, void *data)
 {
+	char *options = data;
 	const struct cred *cred = current_cred();
 	struct common_audit_data ad;
-	int rc;
+	int rc = 0;
+	struct security_mnt_opts opts;
 
-	// [ SEC_SELINUX_PORTING_COMMON
-	if((strcmp(sb->s_type->name,"sdcardfs")) == 0)
-		mutex_lock(&selinux_sdcardfs_lock);
+	security_init_mnt_opts(&opts);
 
-	rc = superblock_doinit(sb, data);
+	if (!data)
+		goto out;
+
+	BUG_ON(sb->s_type->fs_flags & FS_BINARY_MOUNTDATA);
+
+	rc = selinux_parse_opts_str(options, &opts);
+	if (rc)
+		goto out_err;
+
+out:
+	rc = selinux_set_mnt_opts(sb, &opts, 0, NULL);
+
+out_err:
+	security_free_mnt_opts(&opts);
 	if (rc)
 		goto out;
 
@@ -2998,11 +2984,6 @@ static int selinux_sb_kern_mount(struct super_block *sb, int flags, void *data)
 	ad.u.dentry = sb->s_root;
 	rc = superblock_has_perm(cred, sb, FILESYSTEM__MOUNT, &ad);
 
-out:
-	if((strcmp(sb->s_type->name,"sdcardfs")) == 0)
-		mutex_unlock(&selinux_sdcardfs_lock);
-	// ] SEC_SELINUX_PORTING_COMMON
-	
 	return rc;
 }
 
@@ -7495,7 +7476,11 @@ static __init int selinux_init(void)
 
 static void delayed_superblock_init(struct super_block *sb, void *unused)
 {
-	superblock_doinit(sb, NULL);
+	struct security_mnt_opts opts;
+
+	security_init_mnt_opts(&opts);
+	selinux_set_mnt_opts(sb, &opts, 0, NULL);
+	security_free_mnt_opts(&opts);
 }
 
 void selinux_complete_init(void)
