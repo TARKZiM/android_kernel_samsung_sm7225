@@ -658,11 +658,7 @@ emit_cond_jmp:
 					    &func_addr, &func_addr_fixed);
 		if (ret < 0)
 			return ret;
-		if (func_addr_fixed)
-			/* We can use optimized emission here. */
-			emit_a64_mov_i64(tmp, func_addr, ctx);
-		else
-			emit_addr_mov_i64(tmp, func_addr, ctx);
+		emit_addr_mov_i64(tmp, func_addr, ctx);
 		emit(A64_BLR(tmp), ctx);
 		emit(A64_MOV(1, r0, A64_R(0)), ctx);
 		break;
