@@ -65,6 +65,7 @@ void dlog_hook_rmdir(struct dentry *, struct path *);
  */
 extern int legacy_get_tree(struct fs_context *fc);
 extern int parse_monolithic_mount_data(struct fs_context *, void *);
+extern void fc_drop_locked(struct fs_context *);
 
 /*
  * namei.c
