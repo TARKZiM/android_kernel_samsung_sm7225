@@ -614,9 +614,12 @@ static int inet6_dump_fib(struct sk_buff *skb, struct netlink_callback *cb)
 		hlist_for_each_entry_rcu(tb, head, tb6_hlist) {
 			if (e < s_e)
 				goto next;
+		if (!cb->args[0]) {
 			res = fib6_dump_table(tb, skb, cb);
-			if (res != 0)
-				goto out;
+			if (!res)
+				cb->args[0] = 1;
+		}
+		goto out;
 next:
 			e++;
 		}
