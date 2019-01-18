@@ -222,7 +222,6 @@ static void cred_init_security(void)
 	tsec = &init_sec;
 	tsec->bp_cred = cred;
 #else
-	lsm_early_cred(cred);
 	tsec = selinux_cred(cred);
 #endif
 	tsec->osid = tsec->sid = SECINITSID_KERNEL;
