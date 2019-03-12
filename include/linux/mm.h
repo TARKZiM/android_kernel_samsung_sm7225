@@ -28,6 +28,7 @@
 #include <linux/overflow.h>
 #include <linux/android_kabi.h>
 #include <linux/ratelimit.h>
+#include <linux/sizes.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -2633,9 +2634,13 @@ int __must_check write_one_page(struct page *page);
 void task_dirty_inc(struct task_struct *tsk);
 
 /* readahead.c */
+<<<<<<< HEAD
 #define VM_MAX_READAHEAD	128	/* kbytes */
 #define VM_MIN_READAHEAD	16	/* kbytes (includes current page) */
 extern unsigned int mmap_readaround_limit;
+=======
+#define VM_READAHEAD_PAGES	(SZ_128K / PAGE_SIZE)
+>>>>>>> 804052012d98 (BACKPORT: mm: refactor readahead defines in mm.h)
 
 int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 			pgoff_t offset, unsigned long nr_to_read);
