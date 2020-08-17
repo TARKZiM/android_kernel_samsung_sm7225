@@ -741,4 +741,6 @@ int dsi_display_ctrl_deinit(struct dsi_display *display);
 #endif
 
 int dsi_display_pm_runtime_update(struct dsi_display *display, bool enable);
+struct dsi_display *get_main_display(void);
+
 #endif /* _DSI_DISPLAY_H_ */
