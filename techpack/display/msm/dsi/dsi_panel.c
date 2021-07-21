@@ -37,6 +37,38 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 #define MIN_PREFILL_LINES      35
 
+struct bda {
+    u32 brightness;
+    u32 dim_alpha;
+};
+
+struct bda fod_dim_lut[] = {
+	{0, 0xFF},
+	{1, 0xEC},
+	{2, 0xE6},
+	{3, 0xE0},
+	{4, 0xDC},
+	{6, 0xD5},
+	{10, 0xCA},
+	{20, 0xB7},
+	{21, 0xB5},
+	{30, 0xA8},
+	{42, 0x9A},
+	{63, 0x85},
+	{84, 0x74},
+	{105, 0x65},
+	{126, 0x58},
+	{147, 0x4C},
+	{168, 0x40},
+	{189, 0x36},
+	{210, 0x2C},
+	{231, 0x23},
+	{252, 0x1A},
+	{273, 0x11},
+	{294, 0x9},
+	{315, 0x1},
+};
+
 enum dsi_dsc_ratio_type {
 	DSC_8BPC_8BPP,
 	DSC_10BPC_8BPP,
@@ -999,6 +1031,51 @@ error:
 static u32 dsi_panel_get_backlight(struct dsi_panel *panel)
 {
 	return panel->bl_config.bl_level;
+}
+
+static u32 interpolate(uint32_t x, uint32_t xa, uint32_t xb, uint32_t ya, uint32_t yb)
+{
+	return ya - (ya - yb) * (x - xa) / (xb - xa);
+}
+
+u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
+{
+	u32 brightness = dsi_panel_get_backlight(panel);
+	int len = ARRAY_SIZE(fod_dim_lut);
+	int i;
+
+	for (i = 0; i < len; i++)
+		if (fod_dim_lut[i].brightness >= brightness)
+			break;
+
+	if (i == 0)
+		return fod_dim_lut[i].dim_alpha;
+
+	if (i == len)
+		return fod_dim_lut[i - 1].dim_alpha;
+
+	return interpolate(brightness,
+			fod_dim_lut[i].brightness, fod_dim_lut[i - 1].brightness,
+			fod_dim_lut[i].dim_alpha, fod_dim_lut[i - 1].dim_alpha);
+}
+
+int dsi_panel_set_fod_hbm(struct dsi_panel *panel, bool status)
+{
+	int rc = 0;
+
+	if (status) {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD_ON);
+		if (rc)
+			pr_err("[%s] failed to send DSI_CMD_SET_DISP_HBM_FOD_ON cmd, rc=%d\n",
+					panel->name, rc);
+	} else {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD_OFF);
+		if (rc)
+			pr_err("[%s] failed to send DSI_CMD_SET_DISP_HBM_FOD_OFF cmd, rc=%d\n",
+					panel->name, rc);
+	}
+
+	return rc;
 }
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
@@ -2104,6 +2181,8 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command",
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
+	"qcom,mdss-dsi-dispparam-hbm-fod-on-command",
+	"qcom,mdss-dsi-dispparam-hbm-fod-off-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -2130,6 +2209,8 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command-state",
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
+	"qcom,mdss-dsi-dispparam-hbm-fod-on-command-state",
+	"qcom,mdss-dsi-dispparam-hbm-fod-off-command-state",
 };
 
 static int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt)
@@ -2723,6 +2804,68 @@ error:
 	return rc;
 }
 
+static int dsi_panel_parse_fod_dim_lut(struct dsi_panel *panel,
+		struct dsi_parser_utils *utils)
+{
+	struct brightness_alpha_pair *lut;
+	u32 *array;
+	int count;
+	int len;
+	int rc;
+	int i;
+
+	len = utils->count_u32_elems(utils->data, "qcom,disp-fod-dim-lut");
+	if (len <= 0 || len % BRIGHTNESS_ALPHA_PAIR_LEN) {
+		pr_err("[%s] invalid number of elements, rc=%d\n",
+				panel->name, rc);
+		rc = -EINVAL;
+		goto count_fail;
+	}
+
+	array = kcalloc(len, sizeof(u32), GFP_KERNEL);
+	if (!array) {
+		pr_err("[%s] failed to allocate memory, rc=%d\n",
+				panel->name, rc);
+		rc = -ENOMEM;
+		goto alloc_array_fail;
+	}
+
+	rc = utils->read_u32_array(utils->data,
+			"qcom,disp-fod-dim-lut", array, len);
+	if (rc) {
+		pr_err("[%s] failed to allocate memory, rc=%d\n",
+				panel->name, rc);
+		goto read_fail;
+	}
+
+	count = len / BRIGHTNESS_ALPHA_PAIR_LEN;
+	lut = kcalloc(count, sizeof(*lut), GFP_KERNEL);
+	if (!lut) {
+		rc = -ENOMEM;
+		goto alloc_lut_fail;
+	}
+
+	for (i = 0; i < count; i++) {
+		struct brightness_alpha_pair *pair = &lut[i];
+		pair->brightness = array[i * BRIGHTNESS_ALPHA_PAIR_LEN + 0];
+		pair->alpha = array[i * BRIGHTNESS_ALPHA_PAIR_LEN + 1];
+	}
+
+	panel->fod_dim_lut = lut;
+	panel->fod_dim_lut_count = count;
+
+alloc_lut_fail:
+read_fail:
+	kfree(array);
+alloc_array_fail:
+count_fail:
+	if (rc) {
+		panel->fod_dim_lut = NULL;
+		panel->fod_dim_lut_count = 0;
+	}
+	return rc;
+}
+
 static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -2810,6 +2953,10 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 
 	panel->bl_config.bl_inverted_dbv = utils->read_bool(utils->data,
 		"qcom,mdss-dsi-bl-inverted-dbv");
+
+	rc = dsi_panel_parse_fod_dim_lut(panel, utils);
+	if (rc)
+		pr_err("[%s failed to parse fod dim lut\n", panel->name);
 
 	if (panel->bl_config.type == DSI_BACKLIGHT_PWM) {
 		rc = dsi_panel_parse_bl_pwm_config(panel);
