@@ -75,10 +75,10 @@
 #include <net/l3mdev.h>
 #include <linux/android_kabi.h>
 
-// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#ifdef CONFIG_KNOX_NCM
 #define NAP_PROCESS_NAME_LEN	128
 #define NAP_DOMAIN_NAME_LEN	255
-// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
+#endif
 
 /*
  * This structure really needs to be cleaned up.
@@ -503,7 +503,7 @@ struct sock {
 #endif
 	struct sock_cgroup_data	sk_cgrp_data;
 	struct mem_cgroup	*sk_memcg;
-	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+	#ifdef CONFIG_KNOX_NCM
 	uid_t			knox_uid;
 	pid_t			knox_pid;
 	uid_t			knox_dns_uid;
@@ -514,7 +514,7 @@ struct sock {
 	char			parent_process_name[NAP_PROCESS_NAME_LEN];
 	pid_t			knox_dns_pid;
 	char 			dns_process_name[NAP_PROCESS_NAME_LEN];
-	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
+	#endif
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk);
 	void			(*sk_write_space)(struct sock *sk);
