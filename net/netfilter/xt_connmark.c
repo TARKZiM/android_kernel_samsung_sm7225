@@ -91,9 +91,11 @@ static unsigned int knoxvpn_uidpid(struct sk_buff *skb, u_int32_t newmark)
 		pr_err("KNOX: The mark is out of range");
 		return -1;
 	} else {
+	#ifdef CONFIG_KNOX_NCM
 		knox_shinfo->uid = skb->sk->knox_uid;
 		knox_shinfo->pid = skb->sk->knox_pid;
 		knox_shinfo->knox_mark = newmark;
+	#endif
 	}
 
 	return 0;
