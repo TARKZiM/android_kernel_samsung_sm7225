@@ -1006,7 +1006,7 @@ static int ccid_cdev_init(struct cdev *cdev, const struct file_operations *fops,
 		goto err_cdev_add;
 	}
 
-	dev = device_create(ccid_class, NULL, MKDEV(major, minor), NULL, name);
+	dev = device_create(ccid_class, NULL, MKDEV(major, minor), NULL, "%s", name);
 	if (IS_ERR(dev)) {
 		ret = PTR_ERR(dev);
 		goto err_create_dev;

@@ -12,3 +12,5 @@ rmnet-y		 += rmnet_map_command.o
 rmnet-y		 += rmnet_descriptor.o
 rmnet-y		 += rmnet_genl.o
 obj-$(CONFIG_RMNET) += rmnet.o
+obj-$(CONFIG_RMNET_SHS) += shs/
+obj-$(CONFIG_RMNET_PERF) += perf/

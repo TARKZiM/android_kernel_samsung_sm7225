@@ -582,6 +582,13 @@ void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 {
 	struct task_struct *p;
 	struct task_struct *task;
+	unsigned long cur_rss_sum;
+	unsigned long heaviest_rss_sum = 0;
+	char heaviest_comm[TASK_COMM_LEN];
+	unsigned long total_rss_sum = 0;
+	pid_t heaviest_pid;
+
+#define K(x) ((x) << (PAGE_SHIFT-10))
 
 	pr_info("Tasks state (memory values in pages):\n");
 	pr_info("[  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name\n");
@@ -606,9 +613,23 @@ void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 			mm_pgtables_bytes(task->mm),
 			get_mm_counter(task->mm, MM_SWAPENTS),
 			task->signal->oom_score_adj, task->comm);
+		cur_rss_sum = get_mm_rss(task->mm) +
+					get_mm_counter(task->mm, MM_SWAPENTS);
+		total_rss_sum += cur_rss_sum;
+		if (cur_rss_sum > heaviest_rss_sum) {
+			heaviest_rss_sum = cur_rss_sum;
+			strncpy(heaviest_comm, task->comm, TASK_COMM_LEN);
+			heaviest_pid = task->pid;
+		}
 		task_unlock(task);
 	}
 	rcu_read_unlock();
+	if (heaviest_rss_sum)
+		pr_info("heaviest_task_rss:%s(%d) size:%luKB, total:%luKB/%luKB\n",
+			heaviest_comm, heaviest_pid, K(heaviest_rss_sum),
+			K(total_rss_sum), K(totalram_pages));
+#undef K
+	ion_account_print_usage();
 }
 
 static void dump_header(struct oom_control *oc, struct task_struct *p)
@@ -1060,12 +1081,11 @@ static void __oom_kill_process(struct task_struct *victim)
 	 */
 	do_send_sig_info(SIGKILL, SEND_SIG_FORCED, victim, PIDTYPE_TGID);
 	mark_oom_victim(victim);
-	pr_err("Killed process %d (%s) total-vm:%lukB, anon-rss:%lukB, file-rss:%lukB, shmem-rss:%lukB oom_score_adj=%hd\n",
+	pr_err("Killed process %d (%s) total-vm:%lukB, anon-rss:%lukB, file-rss:%lukB, shmem-rss:%lukB\n",
 		task_pid_nr(victim), victim->comm, K(victim->mm->total_vm),
 		K(get_mm_counter(victim->mm, MM_ANONPAGES)),
 		K(get_mm_counter(victim->mm, MM_FILEPAGES)),
-		K(get_mm_counter(victim->mm, MM_SHMEMPAGES)),
-		p->signal->oom_score_adj);
+		K(get_mm_counter(victim->mm, MM_SHMEMPAGES)));
 	task_unlock(victim);
 
 	/*
@@ -1123,8 +1143,7 @@ static int oom_kill_memcg_member(struct task_struct *task, void *unused)
 	return 0;
 }
 
-static void oom_kill_process(struct oom_control *oc, const char *message,
-				bool quiet)
+static void oom_kill_process(struct oom_control *oc, const char *message)
 {
 	struct task_struct *p = oc->chosen;
 	unsigned int points = oc->chosen_points;
@@ -1133,8 +1152,7 @@ static void oom_kill_process(struct oom_control *oc, const char *message,
 	struct task_struct *t;
 	struct mem_cgroup *oom_group;
 	unsigned int victim_points = 0;
-	static DEFINE_RATELIMIT_STATE(oom_rs, DEFAULT_RATELIMIT_INTERVAL,
-					      DEFAULT_RATELIMIT_BURST);
+	static DEFINE_RATELIMIT_STATE(oom_rs, DEFAULT_RATELIMIT_INTERVAL, 1);
 
 	/*
 	 * If the task is already exiting, don't alarm the sysadmin or kill
@@ -1151,7 +1169,7 @@ static void oom_kill_process(struct oom_control *oc, const char *message,
 	}
 	task_unlock(p);
 
-	if (!quiet && __ratelimit(&oom_rs))
+	if (__ratelimit(&oom_rs))
 		dump_header(oc, p);
 
 	pr_err("%s: Kill process %d (%s) score %u or sacrifice child\n",
@@ -1323,8 +1341,7 @@ bool out_of_memory(struct oom_control *oc)
 	    current->signal->oom_score_adj != OOM_SCORE_ADJ_MIN) {
 		get_task_struct(current);
 		oc->chosen = current;
-		oom_kill_process(oc, "Out of memory (oom_kill_allocating_task)",
-				 false);
+		oom_kill_process(oc, "Out of memory (oom_kill_allocating_task)");
 		return true;
 	}
 
@@ -1344,8 +1361,7 @@ bool out_of_memory(struct oom_control *oc)
 	}
 	if (oc->chosen && oc->chosen != (void *)-1UL)
 		oom_kill_process(oc, !is_memcg_oom(oc) ? "Out of memory" :
-				 "Memory cgroup out of memory",
-			IS_ENABLED(CONFIG_HAVE_USERSPACE_LOW_MEMORY_KILLER));
+				 "Memory cgroup out of memory");
 	return !!oc->chosen;
 }
 

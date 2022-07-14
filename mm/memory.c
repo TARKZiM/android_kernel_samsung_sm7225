@@ -3896,10 +3896,14 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
  * there is no much gain with fault_around.
  */
 static unsigned long fault_around_bytes __read_mostly =
+#ifdef CONFIG_FAULT_AROUND_4KB
+	rounddown_pow_of_two(4096);
+#else
 #ifndef __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS
 	PAGE_SIZE;
 #else
 	rounddown_pow_of_two(65536);
+#endif
 #endif
 
 #ifdef CONFIG_DEBUG_FS
@@ -4742,6 +4746,7 @@ int __handle_speculative_fault(struct mm_struct *mm, unsigned long address,
 			count_vm_event(SPECULATIVE_PGFAULT_FILE);
 		put_vma(vmf.vma);
 		*vma = NULL;
+		check_sync_rss_stat(current);
 	}
 
 	/*
@@ -4767,6 +4772,7 @@ out_segv:
 	 */
 	put_vma(vmf.vma);
 	*vma = NULL;
+	check_sync_rss_stat(current);
 	return VM_FAULT_SIGSEGV;
 }
 

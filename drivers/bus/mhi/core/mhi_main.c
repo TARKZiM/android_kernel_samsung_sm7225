@@ -1208,21 +1208,19 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
 				enum MHI_PM_STATE new_state;
 
 				/*
-				 * Allow move to SYS_ERROR even if RDDM is
-				 * supported so that core driver is inactive
-				 * with anticipation of an upcoming RDDM event
+				 * Don't process sys error if device support
+				 * rddm since we will be processing rddm ee
+				 * event instead of sys error state change event
 				 */
-				write_lock_irq(&mhi_cntrl->pm_lock);
-				/* skip if RDDM event was already processed */
-				if (mhi_cntrl->ee == MHI_EE_RDDM) {
-					write_unlock_irq(&mhi_cntrl->pm_lock);
+				if (mhi_cntrl->ee == MHI_EE_RDDM ||
+				    mhi_cntrl->rddm_supported)
 					break;
-				}
+
+				MHI_ERR("MHI system error detected\n");
+				write_lock_irq(&mhi_cntrl->pm_lock);
 				new_state = mhi_tryset_pm_state(mhi_cntrl,
 							MHI_PM_SYS_ERR_DETECT);
 				write_unlock_irq(&mhi_cntrl->pm_lock);
-
-				MHI_ERR("MHI system error detected\n");
 				if (new_state == MHI_PM_SYS_ERR_DETECT)
 					mhi_process_sys_err(mhi_cntrl);
 				break;
@@ -1260,22 +1258,6 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
 				st = MHI_ST_TRANSITION_MISSION_MODE;
 				break;
 			case MHI_EE_RDDM:
-				if (mhi_cntrl->ee == MHI_EE_RDDM ||
-				    mhi_cntrl->power_down)
-					break;
-
-				MHI_ERR("RDDM event occurred!\n");
-				write_lock_irq(&mhi_cntrl->pm_lock);
-				mhi_cntrl->ee = MHI_EE_RDDM;
-				write_unlock_irq(&mhi_cntrl->pm_lock);
-
-				/* notify critical clients */
-				mhi_control_error(mhi_cntrl);
-
-				mhi_cntrl->status_cb(mhi_cntrl,
-						     mhi_cntrl->priv_data,
-						     MHI_CB_EE_RDDM);
-				wake_up_all(&mhi_cntrl->state_event);
 				break;
 			default:
 				MHI_ERR("Unhandled EE event:%s\n",
@@ -1679,13 +1661,12 @@ irqreturn_t mhi_intvec_threaded_handlr(int irq_number, void *dev)
 		write_unlock_irq(&mhi_cntrl->pm_lock);
 
 		MHI_ERR("RDDM event occurred!\n");
-
-		/* notify critical clients with early notifications */
-		mhi_control_error(mhi_cntrl);
-
 		mhi_cntrl->status_cb(mhi_cntrl, mhi_cntrl->priv_data,
 				     MHI_CB_EE_RDDM);
 		wake_up_all(&mhi_cntrl->state_event);
+
+		/* notify critical clients with early notifications */
+		mhi_control_error(mhi_cntrl);
 
 		goto exit_intvec;
 	}
@@ -2633,7 +2614,7 @@ int mhi_get_remote_time_sync(struct mhi_device *mhi_dev,
 	/* bring to M0 state */
 	ret = __mhi_device_get_sync(mhi_cntrl);
 	if (ret)
-		goto error_unlock;
+		goto err_unlock;
 
 	read_lock_bh(&mhi_cntrl->pm_lock);
 	if (unlikely(MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state))) {
@@ -2671,7 +2652,7 @@ int mhi_get_remote_time_sync(struct mhi_device *mhi_dev,
 error_invalid_state:
 	mhi_cntrl->wake_put(mhi_cntrl, false);
 	read_unlock_bh(&mhi_cntrl->pm_lock);
-error_unlock:
+err_unlock:
 	mutex_unlock(&mhi_cntrl->tsync_mutex);
 	return ret;
 }
@@ -2738,11 +2719,8 @@ int mhi_get_remote_time(struct mhi_device *mhi_dev,
 	tsync_node->cb_func = cb_func;
 	tsync_node->mhi_dev = mhi_dev;
 
-	if (mhi_tsync->db_response_pending) {
-		mhi_device_put(mhi_cntrl->mhi_dev,
-			       MHI_VOTE_DEVICE | MHI_VOTE_BUS);
+	if (mhi_tsync->db_response_pending)
 		goto skip_tsync_db;
-	}
 
 	mhi_tsync->int_sequence++;
 	if (mhi_tsync->int_sequence == 0xFFFFFFFF)

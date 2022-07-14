@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2002,2008-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2002,2008-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -157,7 +157,16 @@ static int print_mem_entry(void *data, void *ptr)
 	if (usermem_type == KGSL_MEM_ENTRY_ION)
 		kgsl_get_egl_counts(entry, &egl_surface_count,
 						&egl_image_count);
-
+#if defined(CONFIG_DISPLAY_SAMSUNG) && !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	seq_printf(s, m->useraddr ? "%p %p %16llu %5d %9s %10s %16s %5d %16llu %6d %6d" :
+			"%p %pK %16llu %5d %9s %10s %16s %5d %16llu %6d %6d",
+			(uint64_t *)(uintptr_t) m->gpuaddr,
+			(unsigned long *) m->useraddr,
+			m->size, entry->id, flags,
+			memtype_str(usermem_type),
+			usage, (m->sgt ? m->sgt->nents : 0), m->mapsize,
+			egl_surface_count, egl_image_count);
+#else
 	seq_printf(s, "%pK %pK %16llu %5d %9s %10s %16s %5d %16ld %6d %6d",
 			(uint64_t *)(uintptr_t) m->gpuaddr,
 			(unsigned long *) m->useraddr,
@@ -166,6 +175,7 @@ static int print_mem_entry(void *data, void *ptr)
 			usage, (m->sgt ? m->sgt->nents : 0),
 			atomic_long_read(&m->mapsize),
 			egl_surface_count, egl_image_count);
+#endif
 
 	if (entry->metadata[0] != 0)
 		seq_printf(s, " %s", entry->metadata);
@@ -393,7 +403,7 @@ void kgsl_process_init_debugfs(struct kgsl_process_private *private)
 	unsigned char name[16];
 	struct dentry *dentry;
 
-	snprintf(name, sizeof(name), "%d", private->pid);
+	snprintf(name, sizeof(name), "%d", pid_nr(private->pid));
 
 	private->debug_root = debugfs_create_dir(name, proc_d_debugfs);
 
@@ -413,14 +423,15 @@ void kgsl_process_init_debugfs(struct kgsl_process_private *private)
 	}
 
 	dentry = debugfs_create_file("mem", 0444, private->debug_root,
-		(void *) ((unsigned long) private->pid), &process_mem_fops);
+		(void *) ((unsigned long) pid_nr(private->pid)),
+		&process_mem_fops);
 
 	if (IS_ERR_OR_NULL(dentry))
 		WARN((dentry == NULL),
 			"Unable to create 'mem' file for %s\n", name);
 
 	dentry = debugfs_create_file("sparse_mem", 0444, private->debug_root,
-		(void *) ((unsigned long) private->pid),
+		(void *) ((unsigned long) pid_nr(private->pid)),
 		&process_sparse_mem_fops);
 
 	if (IS_ERR_OR_NULL(dentry))

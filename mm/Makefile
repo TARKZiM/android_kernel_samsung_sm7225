@@ -2,7 +2,7 @@
 #
 # Makefile for the linux memory manager.
 #
-
+subdir-ccflags-y := -Wformat
 KASAN_SANITIZE_slab_common.o := n
 KASAN_SANITIZE_slab.o := n
 KASAN_SANITIZE_slub.o := n
@@ -43,8 +43,11 @@ obj-y			:= filemap.o mempool.o oom_kill.o fadvise.o \
 			   compaction.o vmacache.o \
 			   interval_tree.o list_lru.o workingset.o \
 			   debug.o $(mmu-y) showmem.o vmpressure.o
+obj-y += showmem_extra.o
 
 obj-y += init-mm.o
+
+obj-y += sec_mm/
 
 ifdef CONFIG_NO_BOOTMEM
 	obj-y		+= nobootmem.o
@@ -89,7 +92,7 @@ obj-$(CONFIG_DEBUG_KMEMLEAK) += kmemleak.o
 obj-$(CONFIG_DEBUG_KMEMLEAK_TEST) += kmemleak-test.o
 obj-$(CONFIG_DEBUG_RODATA_TEST) += rodata_test.o
 obj-$(CONFIG_PAGE_OWNER) += page_owner.o
-obj-$(CONFIG_CLEANCACHE) += cleancache.o
+obj-$(CONFIG_CLEANCACHE) += cleancache.o rbinregion.o rbincache.o
 obj-$(CONFIG_MEMORY_ISOLATION) += page_isolation.o
 obj-$(CONFIG_ZPOOL)	+= zpool.o
 obj-$(CONFIG_ZBUD)	+= zbud.o
@@ -109,3 +112,4 @@ obj-$(CONFIG_PERCPU_STATS) += percpu-stats.o
 obj-$(CONFIG_HMM) += hmm.o
 obj-$(CONFIG_MEMFD_CREATE) += memfd.o
 obj-$(CONFIG_PROCESS_RECLAIM)	+= process_reclaim.o
+obj-$(CONFIG_PAGE_BOOST_RECORDING) += io_record.o

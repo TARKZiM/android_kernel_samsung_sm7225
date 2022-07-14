@@ -1028,7 +1028,7 @@ static void usb_cser_start_io(struct f_cdev *port)
 	int ret = -ENODEV;
 	unsigned long	flags;
 
-	pr_debug("port: %pK\n", port);
+	pr_debug("port: %pF\n", port);
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	if (!port->is_connected)
@@ -1775,7 +1775,7 @@ static struct f_cdev *f_cdev_alloc(char *func_name, int portno)
 		goto err_cdev_add;
 	}
 
-	device = device_create(fcdev_classp, NULL, dev, NULL, port->name);
+	device = device_create(fcdev_classp, NULL, dev, NULL, "%s", port->name);
 	if (IS_ERR(device)) {
 		ret = PTR_ERR(device);
 		goto err_create_dev;
@@ -1896,7 +1896,7 @@ static ssize_t usb_cser_status_show(struct config_item *item, char *page)
 			(port->port_open ? "Opened" : "Closed"));
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	ret = scnprintf(page, temp, buf);
+	ret = scnprintf(page, temp, "%s", buf);
 	kfree(buf);
 
 	return ret;

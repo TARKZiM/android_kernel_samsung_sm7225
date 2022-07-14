@@ -251,6 +251,10 @@ static int fscrypt_new_context_from_policy(union fscrypt_context *ctx_u,
 		       policy->master_key_descriptor,
 		       sizeof(ctx->master_key_descriptor));
 		get_random_bytes(ctx->nonce, sizeof(ctx->nonce));
+
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+		ctx->knox_flags = 0;
+#endif
 		return sizeof(*ctx);
 	}
 	case FSCRYPT_POLICY_V2: {
@@ -267,6 +271,10 @@ static int fscrypt_new_context_from_policy(union fscrypt_context *ctx_u,
 		       policy->master_key_identifier,
 		       sizeof(ctx->master_key_identifier));
 		get_random_bytes(ctx->nonce, sizeof(ctx->nonce));
+
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+		ctx->knox_flags = 0;
+#endif
 		return sizeof(*ctx);
 	}
 	}
@@ -638,6 +646,16 @@ int fscrypt_inherit_context(struct inode *parent, struct inode *child,
 	ctxsize = fscrypt_new_context_from_policy(&ctx, &ci->ci_policy);
 
 	BUILD_BUG_ON(sizeof(ctx) != FSCRYPT_SET_CONTEXT_MAX_SIZE);
+
+#ifdef CONFIG_FSCRYPT_SDP
+	res = fscrypt_sdp_inherit_context(parent, child, &ctx, fs_data);
+	if (res) {
+		printk_once(KERN_WARNING
+				"%s: Failed to set sensitive ongoing flag (err:%d)\n", __func__, res);
+		return res;
+	}
+#endif
+
 	res = parent->i_sb->s_cop->set_context(child, &ctx, ctxsize, fs_data);
 	if (res)
 		return res;

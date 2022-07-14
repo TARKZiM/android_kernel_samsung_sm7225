@@ -53,6 +53,8 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_CS35L33 if I2C
 	select SND_SOC_CS35L34 if I2C
 	select SND_SOC_CS35L35 if I2C
+	select SND_SOC_CS35L45_SPI if SPI_MASTER
+	select SND_SOC_CS35L45_I2C if I2C
 	select SND_SOC_CS42L42 if I2C
 	select SND_SOC_CS42L51_I2C if I2C
 	select SND_SOC_CS42L52 if I2C && INPUT
@@ -278,6 +280,12 @@ config SND_SOC_WM_ADSP
 	default m if SND_SOC_WM5110=m
 	default m if SND_SOC_WM2200=m
 
+config SND_SOC_WM_ADSP_ANDROID_R
+	bool "Cirrus Logic ADSP Android R work-arounds"
+	help
+	  Workaround backported changes to wakeup_source_register in the
+	  Android R kernel
+
 config SND_SOC_AB8500_CODEC
 	tristate
 
@@ -445,6 +453,14 @@ config SND_SOC_CPCAP
 config SND_SOC_CQ0093VC
 	tristate
 
+config SND_SOC_CIRRUS_AMP
+	tristate "Cirrus Logic Amp Feature drivers"
+	help
+	  Enable support for Cirrus Logic smart speaker amplifier factory
+	  driver. Supports various smart amp functions, such as firmware
+	  calibration, data logging, etc. Compatible with CS35L40 and CS35L46
+	  amplifiers.
+
 config SND_SOC_CS35L32
 	tristate "Cirrus Logic CS35L32 CODEC"
 	depends on I2C
@@ -460,6 +476,28 @@ config SND_SOC_CS35L34
 config SND_SOC_CS35L35
 	tristate "Cirrus Logic CS35L35 CODEC"
 	depends on I2C
+
+config SND_SOC_CS35L45
+	tristate "Cirrus Logic CS35L45 CODEC"
+	depends on SND_SOC_CS35L45_SPI || SND_SOC_CS35L45_I2C
+	select SND_SOC_WM_ADSP
+	help
+	  Enable support for Cirrus Logic CS35L45 smart speaker amplifier.
+	  This amplifier supports control over I2C, SPI, and SoundWire.
+	  PCM audio streaming supported over I2S/TDM and SoundWire.
+	  Intended for use with Cirrus Logic WM ADSP framework.
+
+config SND_SOC_CS35L45_SPI
+	tristate "Cirrus Logic CS35L45 CODEC (SPI)"
+	depends on SPI_MASTER
+	select SND_SOC_CS35L45
+	select REGMAP_SPI
+
+config SND_SOC_CS35L45_I2C
+	tristate "Cirrus Logic CS35L45 CODEC (I2C)"
+	depends on I2C
+	select SND_SOC_CS35L45
+	select REGMAP_I2C
 
 config SND_SOC_CS42L42
 	tristate "Cirrus Logic CS42L42 CODEC"
@@ -1310,5 +1348,8 @@ config SND_SOC_NAU8825
 config SND_SOC_TPA6130A2
 	tristate "Texas Instruments TPA6130A2 headphone amplifier"
 	depends on I2C
+
+# DBMDx
+source "sound/soc/codecs/dbmdx/Kconfig"
 
 endmenu

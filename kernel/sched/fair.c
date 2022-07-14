@@ -22,13 +22,24 @@
  */
 #include "sched.h"
 
-#include <trace/events/sched.h>
+#ifdef CONFIG_SEC_PERF_MANAGER
+#include <linux/cpufreq.h>
+#include <linux/percpu.h>
+#include <trace/events/power.h>
+#endif
 
+#include <trace/events/sched.h>
 #include "walt.h"
 
 #ifdef CONFIG_SMP
 static inline bool task_fits_max(struct task_struct *p, int cpu);
 #endif /* CONFIG_SMP */
+
+#ifdef CONFIG_SEC_PERF_MANAGER
+unsigned long get_task_util(struct task_struct *p);
+unsigned long get_max_capacity(int cpu);
+unsigned long get_max_fps_util(int group_id);
+#endif /* CONFIG_FPS */
 
 #ifdef CONFIG_SCHED_WALT
 static void walt_fixup_sched_stats_fair(struct rq *rq, struct task_struct *p,
@@ -86,6 +97,13 @@ unsigned int sysctl_sched_sync_hint_enable = 1;
  * Enable/disable using cstate knowledge in idle sibling selection
  */
 unsigned int sysctl_sched_cstate_aware = 1;
+
+#ifdef CONFIG_SEC_PERF_MANAGER
+DEFINE_PER_CPU(unsigned long, fps_boosted_util);
+DEFINE_PER_CPU(int, fps_boosted_task_count);
+DEFINE_PER_CPU(u64, fps_boosted_last_time);
+DEFINE_PER_CPU(int, fps_group_id);
+#endif /* CONFIG_SEC_PERF_MANAGER */
 
 /*
  * The initial- and re-scaling of tunables is configurable
@@ -5474,6 +5492,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 
+#ifdef CONFIG_SEC_PERF_MANAGER
+	unsigned long next_fps_boosted_util;
+	int boosted_cnt;
+	int cur_group_id = -1, next_group_id = -1;
+	int alloc_cpu = -1;
+#endif
+
 	/*
 	 * The code below (indirectly) updates schedutil which looks at
 	 * the cfs_rq utilization to select a frequency.
@@ -5503,6 +5528,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 #ifdef CONFIG_SCHED_WALT
 	p->misfit = !task_fits_max(p, rq->cpu);
 #endif
+#ifdef CONFIG_SEC_PERF_MANAGER
+	if ( p->drawing_flag ){
+		alloc_cpu = cpu_of(rq);
+		/* Get current value from run queue */
+		boosted_cnt = per_cpu(fps_boosted_task_count, alloc_cpu);
+		cur_group_id = per_cpu(fps_group_id, alloc_cpu);
+		next_group_id = p->drawing_flag;
+
+		/* Get new values. */
+		if ( boosted_cnt < 0) boosted_cnt = 0;
+		boosted_cnt = boosted_cnt + 1;
+		next_fps_boosted_util = get_max_fps_util(p->drawing_flag);
+
+		/* Put new values into run queue. */
+		per_cpu(fps_boosted_task_count, alloc_cpu) = boosted_cnt;
+
+		if (cur_group_id == next_group_id){
+			per_cpu(fps_boosted_util, alloc_cpu) = next_fps_boosted_util;
+		}else {
+			per_cpu(fps_boosted_util, alloc_cpu) = max(get_max_fps_util(cur_group_id), next_fps_boosted_util);
+			per_cpu(fps_group_id, alloc_cpu) = next_group_id;
+		}
+	}
+#endif /* fps_util */
 	/*
 	 * If in_iowait is set, the code below may not trigger any cpufreq
 	 * utilization updates, so do it here explicitly with the IOWAIT flag
@@ -5596,6 +5645,13 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 	int task_sleep = flags & DEQUEUE_SLEEP;
+#ifdef CONFIG_SEC_PERF_MANAGER
+	unsigned long next_fps_boosted_util = 0;
+	int cur_group_id = -1, next_group_id = -1;
+	int alloc_cpu = -1;
+	int boosted_cnt;
+	struct task_struct *rq_task;
+#endif /* fps_util */
 
 	/*
 	 * The code below (indirectly) updates schedutil which looks at
@@ -5604,6 +5660,39 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	 * current task is not more accounted for in the selection of the OPP.
 	 */
 	schedtune_dequeue_task(p, cpu_of(rq));
+
+#ifdef CONFIG_SEC_PERF_MANAGER
+	if ( p->drawing_flag ){
+		alloc_cpu = cpu_of(rq);
+		boosted_cnt = per_cpu(fps_boosted_task_count, alloc_cpu);
+		cur_group_id = per_cpu(fps_group_id, alloc_cpu);
+		next_group_id = p->drawing_flag;
+
+		if (boosted_cnt > 0){
+			boosted_cnt = boosted_cnt - 1;
+		}
+
+		/*
+		*  Initialize fps_boosted_util value when there's no task on alloc_cpu.
+		*  if not, update fps util as a current fps util.
+		*/
+		if (boosted_cnt == 0){
+			per_cpu(fps_boosted_util, alloc_cpu) = 0;
+			per_cpu(fps_group_id, alloc_cpu) = 0;
+		}else{
+			list_for_each_entry(rq_task, &(rq->cfs_tasks), se.group_node) {
+				if ( rq_task != p && rq_task->drawing_flag && (get_max_fps_util(rq_task->drawing_flag) > next_fps_boosted_util) ){
+					next_fps_boosted_util = get_max_fps_util(p->drawing_flag);
+					next_group_id = rq_task->drawing_flag;
+				}
+			}
+			per_cpu(fps_boosted_util, alloc_cpu) = next_fps_boosted_util;
+			per_cpu(fps_group_id, alloc_cpu) = next_group_id;
+		}
+		/* Set a new values up into run queue. */
+		per_cpu(fps_boosted_task_count, alloc_cpu) = boosted_cnt;
+	}
+#endif /* fps_util */
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
@@ -6195,10 +6284,18 @@ stune_util(int cpu, unsigned long other_util,
 	unsigned long util = min_t(unsigned long, SCHED_CAPACITY_SCALE,
 				   cpu_util_freq(cpu, walt_load) + other_util);
 	long margin = schedtune_cpu_margin_with(util, cpu, NULL);
-
+	unsigned long boosted_util;
+#ifdef CONFIG_SEC_PERF_MANAGER
+	unsigned long fps_util = per_cpu(fps_boosted_util, cpu);
+#endif
 	trace_sched_boost_cpu(cpu, util, margin);
+	boosted_util = util + margin;
 
-	return util + margin;
+#ifdef CONFIG_SEC_PERF_MANAGER
+	boosted_util = max(fps_util, boosted_util);
+#endif
+
+	return boosted_util;
 }
 
 #else /* CONFIG_SCHED_TUNE */
@@ -6878,6 +6975,16 @@ static int get_start_cpu(struct task_struct *p)
 			task_boost == TASK_BOOST_ON_MID;
 	bool task_skip_min = task_skip_min_cpu(p);
 
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	int prio_ret = is_low_priority_task(p);
+
+	if (prio_ret == LOW_PRIO_NICE &&
+			rd->min_cap_orig_cpu != -1) {
+		start_cpu = rd->min_cap_orig_cpu;
+		return start_cpu;
+	}
+#endif
+
 	/*
 	 * note about min/mid/max_cap_orig_cpu - either all of them will be -ve
 	 * or just mid will be -1, there never be any other combinations of -1s
@@ -6944,6 +7051,9 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 	int isolated_candidate = -1;
 	unsigned int target_nr_rtg_high_prio = UINT_MAX;
 	bool rtg_high_prio_task = task_rtg_high_prio(p);
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	int prio_ret = is_low_priority_task(p);
+#endif
 
 	/*
 	 * In most cases, target_capacity tracks capacity_orig of the most
@@ -7014,6 +7124,18 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 
 			if (fbt_env->skip_cpu == i)
 				continue;
+
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+			/*
+			 * in case of schedboost usecase
+			 * low priority tasks
+			 * are not allowed to migrate prime cluster
+			 */
+			if (!is_min_capacity_cpu(i) &&
+					(prio_ret == LOW_PRIO_NICE) &&
+					sysctl_sched_boost > 0)
+				continue;
+#endif /* CONFIG_SCHED_SEC_TASK_BOOST */
 
 			/*
 			 * p's blocked utilization is still accounted for on prev_cpu
@@ -8145,6 +8267,10 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
 	int scale = cfs_rq->nr_running >= sched_nr_latency;
 	int next_buddy_marked = 0;
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	int curr_cpu = cpu_of(rq);
+	struct root_domain *rd = cpu_rq(smp_processor_id())->rd;
+#endif
 
 	if (unlikely(se == pse))
 		return;
@@ -8162,6 +8288,12 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 		set_next_buddy(pse);
 		next_buddy_marked = 1;
 	}
+
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	/* In case of 'current' task is in boost, don't preempt */
+	if (per_task_boost(curr) > 0)
+		return;
+#endif
 
 	/*
 	 * We can come here with TIF_NEED_RESCHED already set from new task
@@ -8191,6 +8323,18 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	find_matching_se(&se, &pse);
 	update_curr(cfs_rq_of(se));
 	BUG_ON(!pse);
+
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	/*
+	 * If task 'p' is in boost, preempt 'current' task
+	 * when current is scheduled in max_cap cpu
+	 */
+	if (rd->max_cap_orig_cpu != -1
+				&& (capacity_curr_of(rd->max_cap_orig_cpu) == capacity_curr_of(curr_cpu))
+				&& (per_task_boost(p) > 0))
+		goto preempt;
+#endif
+
 	if (wakeup_preempt_entity(se, pse) == 1) {
 		/*
 		 * Bias pick_next to pick the sched entity that is
@@ -8707,7 +8851,10 @@ static
 int can_migrate_task(struct task_struct *p, struct lb_env *env)
 {
 	int tsk_cache_hot;
-
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	struct root_domain *rd = cpu_rq(smp_processor_id())->rd;
+	int prio_ret = is_low_priority_task(p);
+#endif
 	lockdep_assert_held(&env->src_rq->lock);
 
 	/*
@@ -8790,6 +8937,19 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	if (env->flags & LBF_IGNORE_BIG_TASKS &&
 		!task_fits_max(p, env->dst_cpu))
 		return 0;
+
+#ifdef CONFIG_SCHED_SEC_TASK_BOOST
+	/*
+	 * Don't detach low priority task from mid/little cluster to prime cluster
+	 * in schedboost use-cases.
+	 */
+	if (rd->max_cap_orig_cpu != -1
+				&& (capacity_curr_of(rd->max_cap_orig_cpu) == capacity_curr_of(env->dst_cpu))
+				&& (prio_ret == LOW_PRIO_NICE)
+				&& sysctl_sched_boost > 0){
+		return 0;
+	}
+#endif /* CONFIG_SCHED_SEC_TASK_BOOST */
 #endif
 
 	/* Don't detach task if it is under active migration */
@@ -12996,5 +13156,19 @@ void check_for_migration(struct rq *rq, struct task_struct *p)
 		raw_spin_unlock(&migration_lock);
 	}
 }
+
+#ifdef CONFIG_SEC_PERF_MANAGER
+
+unsigned long get_task_util(struct task_struct *p){
+	return task_util_est(p);
+}
+EXPORT_SYMBOL_GPL(get_task_util);
+
+unsigned long get_max_capacity(int cpu){
+	return capacity_orig_of(cpu);
+}
+EXPORT_SYMBOL_GPL(get_max_capacity);
+
+#endif /* CONFIG_SEC_PERF_MANAGER */
 
 #endif /* CONFIG_SCHED_WALT */

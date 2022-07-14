@@ -181,6 +181,10 @@ dtc_cpp_flags  = -Wp,-MD,$(depfile).pre.tmp -nostdinc                    \
 		 $(addprefix -I,$(DTC_INCLUDE))                          \
 		 -undef -D__DTS__
 
+ifeq ($(CONFIG_SEC_FACTORY),y)
+dtc_cpp_flags += -DCONFIG_SEC_FACTORY
+endif
+
 # Useful for describing the dependency of composite objects
 # Usage:
 #   $(call multi_depend, multi_used_targets, suffix_to_remove, suffix_to_add)
@@ -296,6 +300,19 @@ cmd_dt_S_dtb=						\
 $(obj)/%.dtb.S: $(obj)/%.dtb FORCE
 	$(call if_changed,dt_S_dtb)
 
+show_dtc_error =                                                          \
+(                                                                         \
+	cat $1;                                                           \
+	for err in "$$(cat $1 | grep 'Error:')"; do                       \
+	   echo "See more detail error as below:";                        \
+	   cat $$(echo $$err | cut -d':' -f2) | nl -ba                    \
+	   | head -n $$(echo $$err | grep -Eo ':[0-9]+' | cut -d':' -f2)  \
+	   | tail -n 2;                                                   \
+	done;                                                             \
+	rm $1;                                                            \
+	false;                                                            \
+)
+
 ifneq ($(DTC_EXT),)
 DTC = $(DTC_EXT)
 else
@@ -307,7 +324,8 @@ cmd_dtc = mkdir -p $(dir ${dtc-tmp}) ; \
 	$(CPP) $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $< ; \
 	$(DTC) -O dtb -o $@ -b 0 \
 		$(addprefix -i,$(dir $<) $(DTC_INCLUDE)) $(DTC_FLAGS) \
-		-d $(depfile).dtc.tmp $(dtc-tmp) ; \
+		-q -d $(depfile).dtc.tmp $(dtc-tmp) 2>$@.dtout || $(call show_dtc_error, $@.dtout) ;\
+        $(DTC) -O dts -I dtb -q -o $@.reverse.dts $@ ; \
 	cat $(depfile).pre.tmp $(depfile).dtc.tmp > $(depfile)
 
 $(obj)/%.dtb: $(src)/%.dts $(DTC) FORCE

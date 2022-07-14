@@ -53,6 +53,9 @@
 	pr_debug("%s: " fmt, rdev_get_name(rdev), ##__VA_ARGS__)
 
 static DEFINE_MUTEX(regulator_list_mutex);
+#ifdef CONFIG_SEC_PM
+static LIST_HEAD(regulator_list);
+#endif /* CONFIG_SEC_PM */
 static LIST_HEAD(regulator_map_list);
 static LIST_HEAD(regulator_ena_gpio_list);
 static LIST_HEAD(regulator_supply_alias_list);
@@ -2088,7 +2091,11 @@ static int regulator_ena_gpio_request(struct regulator_dev *rdev,
 		}
 	}
 
+#ifdef CONFIG_SEC_PM
+	if (!config->ena_gpiod && !config->skip_gpio_request) {
+#else
 	if (!config->ena_gpiod) {
+#endif
 		ret = gpio_request_one(config->ena_gpio,
 				       GPIOF_DIR_OUT | config->ena_gpio_flags,
 				       rdev_get_name(rdev));
@@ -2105,7 +2112,12 @@ static int regulator_ena_gpio_request(struct regulator_dev *rdev,
 
 	pin->gpiod = gpiod;
 	pin->ena_gpio_invert = config->ena_gpio_invert;
+#ifdef CONFIG_SEC_PM
+	if (!config->skip_gpio_request)
+		list_add(&pin->list, &regulator_ena_gpio_list);
+#else
 	list_add(&pin->list, &regulator_ena_gpio_list);
+#endif
 
 update_ena_gpio_to_rdev:
 	pin->request_count++;
@@ -2598,8 +2610,11 @@ static int _regulator_is_enabled(struct regulator_dev *rdev)
 {
 	/* A GPIO control always takes precedence */
 	if (rdev->ena_pin)
+#ifdef CONFIG_SEC_PM
+		return rdev->ena_gpio_state | gpiod_get_value_cansleep(rdev->ena_pin->gpiod);
+#else
 		return rdev->ena_gpio_state;
-
+#endif
 	/* If we don't know then assume that the regulator is always on */
 	if (!rdev->desc->ops->is_enabled)
 		return 1;
@@ -3529,6 +3544,28 @@ int regulator_get_voltage(struct regulator *regulator)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(regulator_get_voltage);
+
+#ifdef CONFIG_SEC_PM
+int regulator_set_short_detection(struct regulator *regulator,
+				  bool enable, int lv_uA)
+{
+	struct regulator_dev *rdev = regulator->rdev;
+	int ret;
+
+	mutex_lock(&rdev->mutex);
+
+	if (!rdev->desc->ops->set_short_detection) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = rdev->desc->ops->set_short_detection(rdev, enable, lv_uA);
+out:
+	mutex_unlock(&rdev->mutex);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(regulator_set_short_detection);
+#endif /* CONFIG_SEC_PM */
 
 /**
  * regulator_set_current_limit - set regulator output current limit
@@ -4817,7 +4854,9 @@ regulator_register(const struct regulator_desc *regulator_desc,
 			}
 		}
 	}
-
+#ifdef CONFIG_SEC_PM
+	list_add(&rdev->list, &regulator_list);
+#endif /* CONFIG_SEC_PM */
 	if (!rdev->desc->ops->get_voltage &&
 	    !rdev->desc->ops->list_voltage &&
 	    !rdev->desc->fixed_uV)
@@ -5019,6 +5058,78 @@ void regulator_set_drvdata(struct regulator *regulator, void *data)
 	regulator->rdev->reg_data = data;
 }
 EXPORT_SYMBOL_GPL(regulator_set_drvdata);
+
+#ifdef CONFIG_SEC_PM
+static unsigned int __regulator_get_mode(struct regulator_dev *rdev)
+{
+	int ret;
+
+	/* sanity check */
+	if (!rdev->desc->ops->get_mode) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = rdev->desc->ops->get_mode(rdev);
+out:
+	return ret;
+}
+
+static int regulator_check_str(struct regulator *reg,
+	   unsigned int *slen, char *snames)
+{
+	if (reg->enabled && reg->supply_name) {
+		if (*slen + strlen(reg->supply_name) + 3 > 80)
+			return -ENOMEM;
+		*slen += snprintf(snames + *slen,
+				strlen(reg->supply_name) + 3,
+				", %s", reg->supply_name);
+	}
+	return 0;
+}
+
+void regulator_showall_enabled(void)
+{
+	struct regulator_dev *rdev;
+	unsigned int cnt = 0;
+	unsigned int slen;
+	struct regulator *reg;
+	char snames[80];
+
+	pr_info("---Enabled regulators---\n");
+	mutex_lock(&regulator_list_mutex);
+	list_for_each_entry(rdev, &regulator_list, list) {
+		mutex_lock(&rdev->mutex);
+		if (_regulator_is_enabled(rdev)) {
+			if (rdev->desc->ops) {
+				slen = 0;
+				list_for_each_entry(reg,
+						&rdev->consumer_list, list) {
+					if (regulator_check_str(reg,
+								&slen, snames))
+						break;
+				}
+
+				pr_info("%s: %duV, 0x%x mode%s\n",
+						rdev_get_name(rdev),
+						_regulator_get_voltage(rdev),
+						__regulator_get_mode(rdev),
+						slen ? snames : ", null");
+			} else {
+				pr_info("%s enabled\n", rdev_get_name(rdev));
+			}
+			cnt++;
+		}
+		mutex_unlock(&rdev->mutex);
+	}
+	mutex_unlock(&regulator_list_mutex);
+
+	if (cnt)
+		pr_info("---Enabled regulator count: %d---\n", cnt);
+	else
+		pr_info("---No regulators enabled---\n");
+}
+#endif /* CONFIG_SEC_PM */
 
 /**
  * regulator_get_id - get regulator ID
@@ -5309,6 +5420,10 @@ static int regulator_late_cleanup(struct device *dev, void *data)
 	/* If we can't read the status assume it's on. */
 	if (ops->is_enabled)
 		enabled = ops->is_enabled(rdev);
+#ifdef CONFIG_SEC_PM
+	else if (rdev->ena_pin)
+		enabled = !gpiod_get_value_cansleep(rdev->ena_pin->gpiod);
+#endif
 	else
 		enabled = 1;
 

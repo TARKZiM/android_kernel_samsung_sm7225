@@ -123,12 +123,19 @@ enum {
 	UPIU_TASK_ATTR_ORDERED	= 0x01,
 	UPIU_TASK_ATTR_HEADQ	= 0x02,
 	UPIU_TASK_ATTR_ACA	= 0x03,
+#ifdef CUSTOMIZE_UPIU_FLAGS
+	UPIU_COMMAND_PRIORITY_HIGH      = 0x4,
+#endif
 };
 
 /* UPIU Query request function */
 enum {
 	UPIU_QUERY_FUNC_STANDARD_READ_REQUEST           = 0x01,
 	UPIU_QUERY_FUNC_STANDARD_WRITE_REQUEST          = 0x81,
+};
+
+enum {
+	UPIU_QUERY_FUNC_VENDOR_TOSHIBA_FATALMODE        = 0xC2,
 };
 
 enum desc_header_offset {
@@ -138,11 +145,25 @@ enum desc_header_offset {
 
 enum ufs_desc_def_size {
 	QUERY_DESC_DEVICE_DEF_SIZE		= 0x59,
+#ifdef CONFIG_BLK_TURBO_WRITE
+	QUERY_DESC_CONFIGURATION_DEF_SIZE	= 0xE2,
+	QUERY_DESC_UNIT_DEF_SIZE		= 0x2D,
+#else
 	QUERY_DESC_CONFIGURATION_DEF_SIZE	= 0x90,
 	QUERY_DESC_UNIT_DEF_SIZE		= 0x23,
+#endif
 	QUERY_DESC_INTERCONNECT_DEF_SIZE	= 0x06,
+#ifdef CONFIG_BLK_TURBO_WRITE
+	QUERY_DESC_GEOMETRY_DEF_SIZE		= 0x58,
+#else
 	QUERY_DESC_GEOMETRY_DEF_SIZE		= 0x48,
+#endif
 	QUERY_DESC_POWER_DEF_SIZE		= 0x62,
+	/*
+	 * Max. 126 UNICODE characters (2 bytes per character) plus 2 bytes
+	 * of descriptor header.
+	 */
+	QUERY_DESC_STRING_DEF_SIZE		= 0xFE,
 	QUERY_DESC_HEALTH_DEF_SIZE		= 0x25,
 };
 
@@ -308,7 +329,12 @@ enum power_desc_param_offset {
 
 /* Exception event mask values */
 enum {
+#ifdef CONFIG_BLK_TURBO_WRITE
+	/* disable tw event [bit 5] as default */
+	MASK_EE_STATUS		= 0xFFDF,
+#else
 	MASK_EE_STATUS		= 0xFFFF,
+#endif
 	MASK_EE_URGENT_BKOPS	= (1 << 2),
 };
 
@@ -384,6 +410,7 @@ enum ufs_dev_pwr_mode {
 	UFS_POWERDOWN_PWR_MODE	= 3,
 };
 
+#ifdef CONFIG_QCOM_WB
 enum ufs_dev_wb_buf_avail_size {
 	UFS_WB_0_PERCENT_BUF_REMAIN = 0x0,
 	UFS_WB_10_PERCENT_BUF_REMAIN = 0x1,
@@ -416,6 +443,7 @@ enum ufs_dev_wb_buf_user_cap_config {
 	UFS_WB_BUFF_PRESERVE_USER_SPACE = 1,
 	UFS_WB_BUFF_USER_SPACE_RED_EN = 2,
 };
+#endif
 /**
  * struct utp_upiu_header - UPIU header structure
  * @dword_0: UPIU header DW-0
@@ -597,19 +625,25 @@ enum {
 	UFS_DEV_REMOVABLE_NON_BOOTABLE	= 0x03,
 };
 
+#ifdef CONFIG_QCOM_WB
 /* Possible values for dExtendedUFSFeaturesSupport */
 enum {
 	UFS_DEV_WRITE_BOOSTER_SUP	= BIT(8),
 };
+#endif
 
 struct ufs_dev_info {
 	/* device descriptor info */
 	u8	b_device_sub_class;
 	u16	w_manufacturer_id;
+	u16	w_manufacturer_date;
 	u8	i_product_name;
 	u16	w_spec_version;
+#ifdef CONFIG_QCOM_WB
 	u32	d_ext_ufs_feature_sup;
 	u8	b_wb_buffer_type;
+#endif
+	u8	i_lt;
 
 	/* query flags */
 	bool f_power_on_wp_en;
@@ -621,10 +655,12 @@ struct ufs_dev_info {
 
 	/* Device deviations from standard UFS device spec. */
 	unsigned int quirks;
+#ifdef CONFIG_QCOM_WB
 
 	bool keep_vcc_on;
 
 	bool wb_config_lun;
+#endif
 };
 
 #define MAX_MODEL_LEN 16
@@ -638,6 +674,9 @@ struct ufs_dev_desc {
 	u16 wmanufacturerid;
 	char model[MAX_MODEL_LEN + 1];
 	u16 wspecversion;
+#ifdef CONFIG_BLK_TURBO_WRITE
+	u32 dextfeatsupport;
+#endif
 };
 
 /**

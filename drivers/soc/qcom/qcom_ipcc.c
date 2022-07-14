@@ -11,6 +11,9 @@
 #include <linux/platform_device.h>
 #include <linux/mailbox_controller.h>
 #include <dt-bindings/soc/qcom,ipcc.h>
+#ifdef CONFIG_SEC_PM
+#include <linux/wakeup_reason.h>
+#endif
 
 /* IPCC Register offsets */
 #define IPCC_REG_SEND_ID		0x0C
@@ -334,6 +337,9 @@ static void msm_ipcc_resume(void)
 		name = desc->action->name;
 
 	pr_warn("%s: %d triggered %s\n", __func__, virq, name);
+#ifdef CONFIG_SEC_PM
+	log_irq_wakeup_reason(virq);
+#endif
 }
 #else
 #define msm_ipcc_suspend NULL

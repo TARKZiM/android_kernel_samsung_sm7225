@@ -44,6 +44,13 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
 
+#if IS_ENABLED(CONFIG_SEC_PM_DEBUG)
+#include <linux/sec-pinmux.h>
+#if IS_ENABLED(CONFIG_SEC_GPIO_DVS)
+#include <linux/secgpio_dvs.h>
+#endif /* CONFIG_SEC_GPIO_DVS */
+#endif /* CONFIG_SEC_PM_DEBUG */
+
 #define SCLK_HZ (32768)
 #define PSCI_POWER_STATE(reset) (reset << 30)
 #define PSCI_AFFINITY_LEVEL(lvl) ((lvl & 0x3) << 24)
@@ -118,6 +125,13 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 static void cluster_prepare(struct lpm_cluster *cluster,
 		const struct cpumask *cpu, int child_idx, bool from_idle,
 		int64_t time);
+
+#if IS_ENABLED(CONFIG_SEC_PM_DEBUG)
+extern void sec_gpio_debug_print(void);
+extern void msm_gpio_print_enabled(void);
+static int msm_pm_sleep_sec_debug;
+module_param_named(secdebug, msm_pm_sleep_sec_debug, int, 0664);
+#endif /* CONFIG_SEC_PM_DEBUG */
 
 static bool print_parsed_dt;
 module_param_named(print_parsed_dt, print_parsed_dt, bool, 0664);
@@ -1710,6 +1724,40 @@ static void register_cluster_lpm_stats(struct lpm_cluster *cl,
 static int lpm_suspend_prepare(void)
 {
 	suspend_in_progress = true;
+
+#ifdef CONFIG_SEC_GPIO_DVS
+	/************************ Caution !!! ****************************
+	 * This functiongit a must be located in appropriate
+	 * SLEEP position in accordance with the specification
+	 * of each BB vendor.
+	 ************************ Caution !!! ****************************/
+	gpio_dvs_check_sleepgpio();
+#ifdef SECGPIO_SLEEP_DEBUGGING
+	/************************ Caution !!! ****************************/
+	/* This func. must be located in an appropriate position for
+	 * GPIO SLEEP debugging in accordance with the specification
+	 * of each BB vendor, and the func. must be called after calling
+	 * the function "gpio_dvs_check_sleepgpio"
+	 ************************ Caution !!! ****************************/
+	gpio_dvs_set_sleepgpio();
+#endif /* SECGPIO_SLEEP_DEBUGGING */
+#endif /* CONFIG_SEC_GPIO_DVS */
+
+#if IS_ENABLED(CONFIG_SEC_PM_DEBUG)
+	if (msm_pm_sleep_sec_debug) {
+		msm_gpio_print_enabled();
+		sec_gpio_debug_print();
+	}
+#endif /* CONFIG_SEC_PM_DEBUG */
+
+#if IS_ENABLED(CONFIG_SEC_PM)
+	regulator_showall_enabled();
+	sec_clock_debug_print_enabled();
+
+	debug_masterstats_show("entry");
+	debug_rpmstats_show("entry");
+#endif /* CONFIG_SEC_PM */
+
 	lpm_stats_suspend_enter();
 
 	return 0;
@@ -1719,6 +1767,11 @@ static void lpm_suspend_wake(void)
 {
 	suspend_in_progress = false;
 	lpm_stats_suspend_exit();
+
+#if IS_ENABLED(CONFIG_SEC_PM)
+	debug_rpmstats_show("exit");
+	debug_masterstats_show("exit");
+#endif
 }
 
 static int lpm_suspend_enter(suspend_state_t state)

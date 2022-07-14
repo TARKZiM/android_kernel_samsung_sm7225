@@ -20,6 +20,9 @@
 #include <linux/reset.h>
 #include <linux/debugfs.h>
 
+#undef dev_dbg
+#define dev_dbg dev_err
+
 /* QUSB2PHY_PWR_CTRL1 register related bits */
 #define PWR_CTRL1_POWR_DOWN		BIT(0)
 #define CLAMP_N_EN			BIT(1)
@@ -61,7 +64,13 @@
 #define LINESTATE_DP			BIT(0)
 #define LINESTATE_DM			BIT(1)
 
-#define BIAS_CTRL_2_OVERRIDE_VAL	0x28
+#if defined (CONFIG_SEC_A42XUQ_PROJECT)
+#define BIAS_CTRL_2_OVERRIDE_VAL    0x11
+#elif defined (CONFIG_SEC_A42XQ_PROJECT)
+#define BIAS_CTRL_2_OVERRIDE_VAL	0x17
+#else
+#define BIAS_CTRL_2_OVERRIDE_VAL	0x14
+#endif
 
 #define DEBUG_CTRL1_OVERRIDE_VAL	0x09
 
@@ -558,6 +567,14 @@ static void qusb_phy_host_init(struct usb_phy *phy)
 	/* Ensure above write is completed before turning ON ref clk */
 	wmb();
 
+	pr_info("%s():Setting qusb phy val: imp_ctrl1 %x, tune1 %x, tune2 %x, tune4 %x, bias_control2 %x\n",
+		__func__,
+		(readl_relaxed(qphy->base + 0x220) & 0xff),
+		(readl_relaxed(qphy->base + 0x240) & 0xff),
+		(readl_relaxed(qphy->base + 0x244) & 0xff),
+		(readl_relaxed(qphy->base + 0x24c) & 0xff),
+		(readl_relaxed(qphy->base + 0x198) & 0xff));
+
 	/* Require to get phy pll lock successfully */
 	usleep_range(150, 160);
 
@@ -657,6 +674,14 @@ static int qusb_phy_init(struct usb_phy *phy)
 
 	/* Ensure above write is completed before turning ON ref clk */
 	wmb();
+
+	pr_info("%s():Setting qusb phy val: imp_ctrl1 %x, tune1 %x, tune2 %x, tune4 %x, bias_control2 %x\n",
+		__func__,
+		(readl_relaxed(qphy->base + 0x220) & 0xff),
+		(readl_relaxed(qphy->base + 0x240) & 0xff),
+		(readl_relaxed(qphy->base + 0x244) & 0xff),
+		(readl_relaxed(qphy->base + 0x24c) & 0xff),
+		(readl_relaxed(qphy->base + 0x198) & 0xff));
 
 	/* Require to get phy pll lock successfully */
 	usleep_range(150, 160);

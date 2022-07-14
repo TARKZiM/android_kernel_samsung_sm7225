@@ -1895,6 +1895,40 @@ fail_kmem_cache_alloc:
 	}
 }
 
+int ipa3_add_pool_page(struct page *page)
+{
+	int ret = -1;
+	unsigned long flags;
+
+	if (page == NULL || page_count(page) != 1 ||
+		compound_order(compound_head(page)) != 3)
+		goto pool_page_return;
+
+	spin_lock_irqsave(&ipa3_ctx->page_pool_spinlock, flags);
+	if (ipa3_ctx->page_pool_idx < IPA_PAGE_POOL_SIZE - 1) {
+		ipa3_ctx->page_pool[ipa3_ctx->page_pool_idx++] = page;
+		ret = 0;
+	}
+	spin_unlock_irqrestore(&ipa3_ctx->page_pool_spinlock, flags);
+
+pool_page_return:
+	return ret;
+}
+EXPORT_SYMBOL(ipa3_add_pool_page);
+
+static struct page *ipa3_get_page_from_pool(void)
+{
+	struct page *p = NULL;
+	unsigned long flags;
+
+	spin_lock_irqsave(&ipa3_ctx->page_pool_spinlock, flags);
+	if (ipa3_ctx->page_pool_idx > 0)
+		p = ipa3_ctx->page_pool[--ipa3_ctx->page_pool_idx];
+	spin_unlock_irqrestore(&ipa3_ctx->page_pool_spinlock, flags);
+
+	return p;
+}
+
 static struct ipa3_rx_pkt_wrapper *ipa3_alloc_rx_pkt_page(
 	gfp_t flag, bool is_tmp_alloc)
 {
@@ -1906,8 +1940,13 @@ static struct ipa3_rx_pkt_wrapper *ipa3_alloc_rx_pkt_page(
 	if (unlikely(!rx_pkt))
 		return NULL;
 	rx_pkt->len = PAGE_SIZE << IPA_WAN_PAGE_ORDER;
-	rx_pkt->page_data.page = __dev_alloc_pages(flag,
-		IPA_WAN_PAGE_ORDER);
+	rx_pkt->page_data.page = __dev_alloc_pages(
+			(flag | __GFP_NORETRY | __GFP_NOWARN), IPA_WAN_PAGE_ORDER);
+	if (!rx_pkt->page_data.page)
+		rx_pkt->page_data.page = ipa3_get_page_from_pool();
+	if (!rx_pkt->page_data.page)
+		rx_pkt->page_data.page = __dev_alloc_pages(flag,
+			IPA_WAN_PAGE_ORDER);
 	if (unlikely(!rx_pkt->page_data.page))
 		goto fail_page_alloc;
 

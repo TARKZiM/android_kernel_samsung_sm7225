@@ -37,3 +37,5 @@ obj-$(CONFIG_CNSS_UTILS) += cnss_utils/
 obj-$(CONFIG_WCNSS_MEM_PRE_ALLOC) += cnss_prealloc/
 
 obj-$(CONFIG_CNSS_GENL) += cnss_genl/
+
+obj-$(CONFIG_QCA_CLD_WLAN)	+= qualcomm/wcn39xx/qcacld-3.0/

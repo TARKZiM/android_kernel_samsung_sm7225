@@ -123,6 +123,9 @@ struct subsys_desc {
 #ifdef CONFIG_SETUP_SSR_NOTIF_TIMEOUTS
 	struct subsys_notif_timeout timeout_data;
 #endif /* CONFIG_SETUP_SSR_NOTIF_TIMEOUTS */
+#ifdef CONFIG_SENSORS_SSC
+	bool run_fssr;
+#endif
 };
 
 /**
@@ -147,6 +150,8 @@ struct notif_data {
 extern int subsys_get_restart_level(struct subsys_device *dev);
 extern int subsystem_restart_dev(struct subsys_device *dev);
 extern int subsystem_restart(const char *name);
+extern int subsystem_crash(const char *name);
+extern void subsys_force_stop(const char *name, bool val);
 extern int subsystem_crashed(const char *name);
 
 extern void *subsystem_get(const char *name);
@@ -168,6 +173,9 @@ void complete_err_ready(struct subsys_device *subsys);
 void complete_shutdown_ack(struct subsys_device *subsys);
 struct subsys_device *find_subsys_device(const char *str);
 extern int wait_for_shutdown_ack(struct subsys_desc *desc);
+#ifdef CONFIG_SENSORS_SSC
+extern void subsys_set_fssr(struct subsys_device *dev, bool value);
+#endif
 #else
 
 static inline int subsys_get_restart_level(struct subsys_device *dev)
@@ -184,7 +192,8 @@ static inline int subsystem_restart(const char *name)
 {
 	return 0;
 }
-
+static inline int subsystem_crash(const char *name) { }
+static inline void subsys_force_stop(const char *name, bool val) { }
 static inline int subsystem_crashed(const char *name)
 {
 	return 0;
@@ -230,6 +239,12 @@ static inline int wait_for_shutdown_ack(struct subsys_desc *desc)
 {
 	return -EOPNOTSUPP;
 }
+#ifdef CONFIG_SENSORS_SSC
+static void subsys_set_fssr(struct subsys_device *dev, bool value)
+{
+	return;
+}
+#endif
 #endif /* CONFIG_MSM_SUBSYSTEM_RESTART */
 
 #endif

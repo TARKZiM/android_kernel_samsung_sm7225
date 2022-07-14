@@ -3,13 +3,21 @@
 # Cryptographic API
 #
 
+# CMVP functional test
+#ccflags-y += -DCONFIG_CRYPTO_FIPS_FUNC_TEST
+
+obj-$(CONFIG_CRYPTO_FIPS) += fips140_out.o
+obj-$(CONFIG_CRYPTO_FIPS) += fips140_integrity.o
+obj-$(CONFIG_CRYPTO_FIPS) += fips140_post.o
+obj-$(CONFIG_CRYPTO_FIPS) += fips140_test.o
+obj-$(CONFIG_CRYPTO_FIPS) += fips140_test_tv.o
+
 obj-$(CONFIG_CRYPTO) += crypto.o
 crypto-y := api.o cipher.o compress.o memneq.o
 
 obj-$(CONFIG_CRYPTO_WORKQUEUE) += crypto_wq.o
 
 obj-$(CONFIG_CRYPTO_ENGINE) += crypto_engine.o
-obj-$(CONFIG_CRYPTO_FIPS) += fips.o
 
 crypto_algapi-$(CONFIG_PROC_FS) += proc.o
 crypto_algapi-y := algapi.o scatterwalk.o $(crypto_algapi-y)
@@ -126,7 +134,7 @@ obj-$(CONFIG_CRYPTO_CRC32C) += crc32c_generic.o
 obj-$(CONFIG_CRYPTO_CRC32) += crc32_generic.o
 obj-$(CONFIG_CRYPTO_CRCT10DIF) += crct10dif_common.o crct10dif_generic.o
 obj-$(CONFIG_CRYPTO_AUTHENC) += authenc.o authencesn.o
-obj-$(CONFIG_CRYPTO_LZO) += lzo.o
+obj-$(CONFIG_CRYPTO_LZO) += lzo.o lzo-rle.o
 obj-$(CONFIG_CRYPTO_LZ4) += lz4.o
 obj-$(CONFIG_CRYPTO_LZ4HC) += lz4hc.o
 obj-$(CONFIG_CRYPTO_842) += 842.o

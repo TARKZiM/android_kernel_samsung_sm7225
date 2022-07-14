@@ -94,6 +94,10 @@ struct limits_dcvs_hw {
 	unsigned long max_freq[NR_CPUS];
 	unsigned long min_freq[NR_CPUS];
 	unsigned long hw_freq_limit;
+#ifdef CONFIG_SEC_PM
+	unsigned long lowest_freq;
+	bool limiting;
+#endif
 	struct device_attribute lmh_freq_attr;
 	struct list_head list;
 	bool is_irq_enabled;
@@ -103,6 +107,10 @@ struct limits_dcvs_hw {
 	struct regulator *isens_reg[2];
 	struct work_struct cdev_register_work;
 };
+
+#ifdef CONFIG_SEC_PM
+extern void *thermal_ipc_log;
+#endif
 
 LIST_HEAD(lmh_dcvs_hw_list);
 DEFINE_MUTEX(lmh_dcvs_list_access);
@@ -188,6 +196,14 @@ static unsigned long limits_mitigation_notify(struct limits_dcvs_hw *hw)
 
 notify_exit:
 	hw->hw_freq_limit = max_limit;
+#ifdef CONFIG_SEC_PM
+	if (hw->limiting == false) {
+		THERMAL_IPC_LOG("Start lmh cpu%d @%lu\n",
+			cpumask_first(&hw->core_map), max_limit);
+		hw->lowest_freq = max_limit;
+		hw->limiting = true;
+	}
+#endif
 	return max_limit;
 }
 
@@ -212,7 +228,17 @@ static void limits_dcvs_poll(struct work_struct *work)
 		writel_relaxed(0xFF, hw->int_clr_reg);
 		hw->is_irq_enabled = true;
 		enable_irq(hw->irq_num);
+#ifdef CONFIG_SEC_PM
+		THERMAL_IPC_LOG("Fin. lmh cpu%d, lowest %lu, f_lim %lu\n",
+			cpumask_first(&hw->core_map), hw->lowest_freq, max_limit);
+		hw->limiting = false;
+		hw->lowest_freq = UINT_MAX;
+#endif
 	} else {
+#ifdef CONFIG_SEC_PM
+		if ((hw->limiting == true) && (max_limit < hw->lowest_freq))
+			hw->lowest_freq = max_limit;
+#endif
 		mod_delayed_work(system_highpri_wq, &hw->freq_poll_work,
 			 msecs_to_jiffies(LIMITS_POLLING_DELAY_MS));
 	}

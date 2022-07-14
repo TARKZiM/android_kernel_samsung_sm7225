@@ -378,7 +378,7 @@ static int __init qtee_shmbridge_init(void)
 	INIT_LIST_HEAD(&bridge_list_head.head);
 
 	/* enable shm bridge mechanism */
-	ret = qtee_shmbridge_enable(true);
+	ret = qtee_shmbridge_enable(false);
 	if (ret) {
 		/* keep the mem pool and return if failed to enable bridge */
 		ret = 0;

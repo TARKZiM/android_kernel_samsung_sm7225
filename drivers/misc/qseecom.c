@@ -3087,6 +3087,16 @@ static int qseecom_unload_app(struct qseecom_dev_handle *data,
 		goto unload_exit;
 	}
 
+	if (!memcmp(data->client.app_name, "tz_iccc", strlen("tz_iccc"))) {
+		pr_debug("Do not unload tz_iccc app from tz\n");
+		goto unload_exit;
+	}
+
+	if (!memcmp(data->client.app_name, "tz_hdm", strlen("tz_hdm"))) {
+		pr_debug("Do not unload tz_hdm app from tz\n");
+		goto unload_exit;
+	}
+
 	__qseecom_cleanup_app(data);
 	__qseecom_reentrancy_check_if_no_app_blocked(TZ_OS_APP_SHUTDOWN_ID);
 

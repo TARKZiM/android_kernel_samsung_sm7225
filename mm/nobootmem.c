@@ -119,6 +119,19 @@ static unsigned long __init __free_memory_core(phys_addr_t start,
 	unsigned long end_pfn = min_t(unsigned long,
 				      PFN_DOWN(end), max_low_pfn);
 
+#ifdef CONFIG_MEMBLOCK_MEMSIZE
+	unsigned long start_align_up = PFN_ALIGN(start);
+	unsigned long end_align_down = PFN_PHYS(end_pfn);
+
+	if (start_pfn >= end_pfn) {
+		memblock_memsize_mod_kernel_size(end - start);
+	} else {
+		if (start_align_up > start)
+			memblock_memsize_mod_kernel_size(start_align_up - start);
+		if (end_pfn != max_low_pfn && end_align_down < end)
+			memblock_memsize_mod_kernel_size(end - end_align_down);
+	}
+#endif
 	if (start_pfn >= end_pfn)
 		return 0;
 
@@ -186,6 +199,8 @@ unsigned long __init free_all_bootmem(void)
 
 	pages = free_low_memory_core_early();
 	totalram_pages += pages;
+
+	memblock_memsize_disable_tracking();
 
 	return pages;
 }
