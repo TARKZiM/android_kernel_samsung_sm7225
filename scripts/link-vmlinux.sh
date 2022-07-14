@@ -422,9 +422,3 @@ if [ ! -z ${RTIC_MPGEN+x} ]; then
 	# RTIC MP DTS generation command fails and it ensures rtic mp
 	# failure does not cause kernel compilation to fail.
 fi
-
-if [ -n "${CONFIG_CRYPTO_FIPS}" ]; then
-	echo '  FIPS : Generating hmac of crypto and updating vmlinux... '
-	PYTHONDONTWRITEBYTECODE=0 "${srctree}/scripts/crypto/fips_crypto_integrity.py" \
-		"${objtree}/vmlinux" "${objtree}/crypto" "${objtree}/arch/arm64/crypto"
-fi
