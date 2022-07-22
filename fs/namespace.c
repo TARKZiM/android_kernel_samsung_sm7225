@@ -2125,20 +2125,6 @@ void drop_collected_mounts(struct vfsmount *mnt)
 	namespace_unlock();
 }
 
-static bool has_locked_children(struct mount *mnt, struct dentry *dentry)
-{
-	struct mount *child;
-
-	list_for_each_entry(child, &mnt->mnt_mounts, mnt_child) {
-		if (!is_subdir(child->mnt_mountpoint, dentry))
-			continue;
-
-		if (child->mnt.mnt_flags & MNT_LOCKED)
-			return true;
-	}
-	return false;
-}
-
 /**
  * clone_private_mount - create a private clone of a path
  *
@@ -2513,7 +2499,6 @@ static int do_change_type(struct path *path, int ms_flags)
 	return err;
 }
 
-<<<<<<< HEAD
 static bool has_locked_children(struct mount *mnt, struct dentry *dentry)
 {
 	struct mount *child;
@@ -2531,8 +2516,6 @@ static bool has_locked_children(struct mount *mnt, struct dentry *dentry)
 	return false;
 }
 
-=======
->>>>>>> 2b78a494a86d... Merge tag 'v4.19.204' of https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux into baseline-r
 /*
  * do loopback mount.
  */
