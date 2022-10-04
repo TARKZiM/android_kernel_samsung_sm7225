@@ -1081,9 +1081,7 @@ again:
 	extref = btrfs_lookup_inode_extref(NULL, root, path, name, namelen,
 					   inode_objectid, parent_objectid, 0,
 					   0);
-	if (IS_ERR(extref)) {
-		return PTR_ERR(extref);
-	} else if (extref) {
+	if (!IS_ERR_OR_NULL(extref)) {
 		u32 item_size;
 		u32 cur_offset = 0;
 		unsigned long base;
