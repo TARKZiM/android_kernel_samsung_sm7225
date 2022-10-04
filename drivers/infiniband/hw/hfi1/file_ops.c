@@ -1222,10 +1222,8 @@ static int setup_base_ctxt(struct hfi1_filedata *fd,
 		goto done;
 
 	ret = init_user_ctxt(fd, uctxt);
-	if (ret) {
-		hfi1_free_ctxt_rcv_groups(uctxt);
+	if (ret)
 		goto done;
-	}
 
 	user_init(uctxt);
 

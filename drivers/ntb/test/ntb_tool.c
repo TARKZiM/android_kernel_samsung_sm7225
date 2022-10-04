@@ -367,16 +367,14 @@ static ssize_t tool_fn_write(struct tool_ctx *tc,
 	u64 bits;
 	int n;
 
-	if (*offp)
-		return 0;
-
 	buf = kmalloc(size + 1, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	if (copy_from_user(buf, ubuf, size)) {
+	ret = simple_write_to_buffer(buf, size, offp, ubuf, size);
+	if (ret < 0) {
 		kfree(buf);
-		return -EFAULT;
+		return ret;
 	}
 
 	buf[size] = 0;

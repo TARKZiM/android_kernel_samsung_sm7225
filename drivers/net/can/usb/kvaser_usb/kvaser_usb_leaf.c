@@ -857,10 +857,8 @@ static void kvaser_usb_leaf_rx_error(const struct kvaser_usb *dev,
 		break;
 	}
 
-	if (new_state != CAN_STATE_BUS_OFF) {
-		cf->data[6] = es->txerr;
-		cf->data[7] = es->rxerr;
-	}
+	cf->data[6] = es->txerr;
+	cf->data[7] = es->rxerr;
 
 	stats->rx_packets++;
 	stats->rx_bytes += cf->can_dlc;
