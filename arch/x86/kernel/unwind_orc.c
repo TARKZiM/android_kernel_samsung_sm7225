@@ -89,27 +89,22 @@ static struct orc_entry *orc_find(unsigned long ip);
 static struct orc_entry *orc_ftrace_find(unsigned long ip)
 {
 	struct ftrace_ops *ops;
-	unsigned long tramp_addr, offset;
+	unsigned long caller;
 
 	ops = ftrace_ops_trampoline(ip);
 	if (!ops)
 		return NULL;
 
-	/* Set tramp_addr to the start of the code copied by the trampoline */
 	if (ops->flags & FTRACE_OPS_FL_SAVE_REGS)
-		tramp_addr = (unsigned long)ftrace_regs_caller;
+		caller = (unsigned long)ftrace_regs_call;
 	else
-		tramp_addr = (unsigned long)ftrace_caller;
-
-	/* Now place tramp_addr to the location within the trampoline ip is at */
-	offset = ip - ops->trampoline;
-	tramp_addr += offset;
+		caller = (unsigned long)ftrace_call;
 
 	/* Prevent unlikely recursion */
-	if (ip == tramp_addr)
+	if (ip == caller)
 		return NULL;
 
-	return orc_find(tramp_addr);
+	return orc_find(caller);
 }
 #else
 static struct orc_entry *orc_ftrace_find(unsigned long ip)
