@@ -1718,9 +1718,6 @@ static void zt_ts_fod_event_report(struct zt_ts_info *info, struct point_info to
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 		input_info(true, &info->client->dev, "%s: FOD %s PRESS: %d\n", __func__,
 				touch_info.byte01.value_u8bit ? "NORMAL" : "LONG", info->scrub_id);
-		input_report_key(info->input_dev, KEY_WAKEUP, 1);
-		input_sync(info->input_dev);
-		input_report_key(info->input_dev, KEY_WAKEUP, 0);
 #else
 		input_info(true, &info->client->dev, "%s: FOD %s PRESS: %d, %d, %d\n", __func__,
 				touch_info.byte01.value_u8bit ? "NORMAL" : "LONG",
