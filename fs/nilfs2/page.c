@@ -372,15 +372,7 @@ void nilfs_clear_dirty_pages(struct address_space *mapping, bool silent)
 			struct page *page = pvec.pages[i];
 
 			lock_page(page);
-
-			/*
-			 * This page may have been removed from the address
-			 * space by truncation or invalidation when the lock
-			 * was acquired.  Skip processing in that case.
-			 */
-			if (likely(page->mapping == mapping))
-				nilfs_clear_dirty_page(page, silent);
-
+			nilfs_clear_dirty_page(page, silent);
 			unlock_page(page);
 		}
 		pagevec_release(&pvec);

@@ -541,20 +541,15 @@ struct ipmi_smi {
 	atomic_t         event_waiters;
 	unsigned int     ticks_to_req_ev;
 
-	spinlock_t       watch_lock; /* For dealing with watch stuff below. */
-
 	/* How many users are waiting for commands? */
-	unsigned int     command_waiters;
+	atomic_t         command_waiters;
 
 	/* How many users are waiting for watchdogs? */
-	unsigned int     watchdog_waiters;
-
-	/* How many users are waiting for message responses? */
-	unsigned int     response_waiters;
+	atomic_t         watchdog_waiters;
 
 	/*
 	 * Tells what the lower layer has last been asked to watch for,
-	 * messages and/or watchdogs.  Protected by watch_lock.
+	 * messages and/or watchdogs.  Protected by xmit_msgs_lock.
 	 */
 	unsigned int     last_watch_mask;
 
@@ -950,64 +945,6 @@ static void deliver_err_response(struct ipmi_smi *intf,
 	deliver_local_response(intf, msg);
 }
 
-static void smi_add_watch(struct ipmi_smi *intf, unsigned int flags)
-{
-	unsigned long iflags;
-
-	if (!intf->handlers->set_need_watch)
-		return;
-
-	spin_lock_irqsave(&intf->watch_lock, iflags);
-	if (flags & IPMI_WATCH_MASK_CHECK_MESSAGES)
-		intf->response_waiters++;
-
-	if (flags & IPMI_WATCH_MASK_CHECK_WATCHDOG)
-		intf->watchdog_waiters++;
-
-	if (flags & IPMI_WATCH_MASK_CHECK_COMMANDS)
-		intf->command_waiters++;
-
-	if ((intf->last_watch_mask & flags) != flags) {
-		intf->last_watch_mask |= flags;
-		intf->handlers->set_need_watch(intf->send_info,
-					       intf->last_watch_mask);
-	}
-	spin_unlock_irqrestore(&intf->watch_lock, iflags);
-}
-
-static void smi_remove_watch(struct ipmi_smi *intf, unsigned int flags)
-{
-	unsigned long iflags;
-
-	if (!intf->handlers->set_need_watch)
-		return;
-
-	spin_lock_irqsave(&intf->watch_lock, iflags);
-	if (flags & IPMI_WATCH_MASK_CHECK_MESSAGES)
-		intf->response_waiters--;
-
-	if (flags & IPMI_WATCH_MASK_CHECK_WATCHDOG)
-		intf->watchdog_waiters--;
-
-	if (flags & IPMI_WATCH_MASK_CHECK_COMMANDS)
-		intf->command_waiters--;
-
-	flags = 0;
-	if (intf->response_waiters)
-		flags |= IPMI_WATCH_MASK_CHECK_MESSAGES;
-	if (intf->watchdog_waiters)
-		flags |= IPMI_WATCH_MASK_CHECK_WATCHDOG;
-	if (intf->command_waiters)
-		flags |= IPMI_WATCH_MASK_CHECK_COMMANDS;
-
-	if (intf->last_watch_mask != flags) {
-		intf->last_watch_mask = flags;
-		intf->handlers->set_need_watch(intf->send_info,
-					       intf->last_watch_mask);
-	}
-	spin_unlock_irqrestore(&intf->watch_lock, iflags);
-}
-
 /*
  * Find the next sequence number not being used and add the given
  * message with the given timeout to the sequence table.  This must be
@@ -1051,7 +988,6 @@ static int intf_next_seq(struct ipmi_smi      *intf,
 		*seq = i;
 		*seqid = intf->seq_table[i].seqid;
 		intf->curr_seq = (i+1)%IPMI_IPMB_NUM_SEQ;
-		smi_add_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES);
 		need_waiter(intf);
 	} else {
 		rv = -EAGAIN;
@@ -1090,7 +1026,6 @@ static int intf_find_seq(struct ipmi_smi      *intf,
 				&& (ipmi_addr_equal(addr, &msg->addr))) {
 			*recv_msg = msg;
 			intf->seq_table[seq].inuse = 0;
-			smi_remove_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES);
 			rv = 0;
 		}
 	}
@@ -1152,7 +1087,6 @@ static int intf_err_seq(struct ipmi_smi *intf,
 		struct seq_table *ent = &intf->seq_table[seq];
 
 		ent->inuse = 0;
-		smi_remove_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES);
 		msg = ent->recv_msg;
 		rv = 0;
 	}
@@ -1162,6 +1096,30 @@ static int intf_err_seq(struct ipmi_smi *intf,
 		deliver_err_response(intf, msg, err);
 
 	return rv;
+}
+
+/* Must be called with xmit_msgs_lock held. */
+static void smi_tell_to_watch(struct ipmi_smi *intf,
+			      unsigned int flags,
+			      struct ipmi_smi_msg *smi_msg)
+{
+	if (flags & IPMI_WATCH_MASK_CHECK_MESSAGES) {
+		if (!smi_msg)
+			return;
+
+		if (!smi_msg->needs_response)
+			return;
+	}
+
+	if (!intf->handlers->set_need_watch)
+		return;
+
+	if ((intf->last_watch_mask & flags) == flags)
+		return;
+
+	intf->last_watch_mask |= flags;
+	intf->handlers->set_need_watch(intf->send_info,
+				       intf->last_watch_mask);
 }
 
 static void free_user_work(struct work_struct *work)
@@ -1240,9 +1198,12 @@ int ipmi_create_user(unsigned int          if_num,
 	spin_lock_irqsave(&intf->seq_lock, flags);
 	list_add_rcu(&new_user->link, &intf->users);
 	spin_unlock_irqrestore(&intf->seq_lock, flags);
-	if (handler->ipmi_watchdog_pretimeout)
+	if (handler->ipmi_watchdog_pretimeout) {
 		/* User wants pretimeouts, so make sure to watch for them. */
-		smi_add_watch(intf, IPMI_WATCH_MASK_CHECK_WATCHDOG);
+		if (atomic_inc_return(&intf->watchdog_waiters) == 1)
+			smi_tell_to_watch(intf, IPMI_WATCH_MASK_CHECK_WATCHDOG,
+					  NULL);
+	}
 	srcu_read_unlock(&ipmi_interfaces_srcu, index);
 	*user = new_user;
 	return 0;
@@ -1315,7 +1276,7 @@ static void _ipmi_destroy_user(struct ipmi_user *user)
 		user->handler->shutdown(user->handler_data);
 
 	if (user->handler->ipmi_watchdog_pretimeout)
-		smi_remove_watch(intf, IPMI_WATCH_MASK_CHECK_WATCHDOG);
+		atomic_dec(&intf->watchdog_waiters);
 
 	if (user->gets_events)
 		atomic_dec(&intf->event_waiters);
@@ -1328,7 +1289,6 @@ static void _ipmi_destroy_user(struct ipmi_user *user)
 		if (intf->seq_table[i].inuse
 		    && (intf->seq_table[i].recv_msg->user == user)) {
 			intf->seq_table[i].inuse = 0;
-			smi_remove_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES);
 			ipmi_free_recv_msg(intf->seq_table[i].recv_msg);
 		}
 	}
@@ -1674,7 +1634,8 @@ int ipmi_register_for_cmd(struct ipmi_user *user,
 		goto out_unlock;
 	}
 
-	smi_add_watch(intf, IPMI_WATCH_MASK_CHECK_COMMANDS);
+	if (atomic_inc_return(&intf->command_waiters) == 1)
+		smi_tell_to_watch(intf, IPMI_WATCH_MASK_CHECK_COMMANDS, NULL);
 
 	list_add_rcu(&rcvr->link, &intf->cmd_rcvrs);
 
@@ -1724,7 +1685,7 @@ int ipmi_unregister_for_cmd(struct ipmi_user *user,
 	synchronize_rcu();
 	release_ipmi_user(user, index);
 	while (rcvrs) {
-		smi_remove_watch(intf, IPMI_WATCH_MASK_CHECK_COMMANDS);
+		atomic_dec(&intf->command_waiters);
 		rcvr = rcvrs;
 		rcvrs = rcvr->next;
 		kfree(rcvr);
@@ -1851,6 +1812,8 @@ static void smi_send(struct ipmi_smi *intf,
 	if (!run_to_completion)
 		spin_lock_irqsave(&intf->xmit_msgs_lock, flags);
 	smi_msg = smi_add_send_msg(intf, smi_msg, priority);
+
+	smi_tell_to_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES, smi_msg);
 
 	if (!run_to_completion)
 		spin_unlock_irqrestore(&intf->xmit_msgs_lock, flags);
@@ -2051,6 +2014,9 @@ static int i_ipmi_req_ipmb(struct ipmi_smi        *intf,
 				ipmb_seq, broadcast,
 				source_address, source_lun);
 
+		/* We will be getting a response in the BMC message queue. */
+		smi_msg->needs_response = true;
+
 		/*
 		 * Copy the message into the recv message data, so we
 		 * can retransmit it later if necessary.
@@ -2238,6 +2204,7 @@ static int i_ipmi_request(struct ipmi_user     *user,
 			goto out;
 		}
 	}
+	smi_msg->needs_response = false;
 
 	rcu_read_lock();
 	if (intf->in_shutdown) {
@@ -3458,8 +3425,9 @@ int ipmi_add_smi(struct module         *owner,
 	INIT_LIST_HEAD(&intf->xmit_msgs);
 	INIT_LIST_HEAD(&intf->hp_xmit_msgs);
 	spin_lock_init(&intf->events_lock);
-	spin_lock_init(&intf->watch_lock);
 	atomic_set(&intf->event_waiters, 0);
+	atomic_set(&intf->watchdog_waiters, 0);
+	atomic_set(&intf->command_waiters, 0);
 	intf->ticks_to_req_ev = IPMI_REQUEST_EV_TIME;
 	INIT_LIST_HEAD(&intf->waiting_events);
 	intf->waiting_events_count = 0;
@@ -4239,53 +4207,7 @@ static int handle_one_recv_msg(struct ipmi_smi *intf,
 	int chan;
 
 	ipmi_debug_msg("Recv:", msg->rsp, msg->rsp_size);
-
-	if ((msg->data_size >= 2)
-	    && (msg->data[0] == (IPMI_NETFN_APP_REQUEST << 2))
-	    && (msg->data[1] == IPMI_SEND_MSG_CMD)
-	    && (msg->user_data == NULL)) {
-
-		if (intf->in_shutdown)
-			goto free_msg;
-
-		/*
-		 * This is the local response to a command send, start
-		 * the timer for these.  The user_data will not be
-		 * NULL if this is a response send, and we will let
-		 * response sends just go through.
-		 */
-
-		/*
-		 * Check for errors, if we get certain errors (ones
-		 * that mean basically we can try again later), we
-		 * ignore them and start the timer.  Otherwise we
-		 * report the error immediately.
-		 */
-		if ((msg->rsp_size >= 3) && (msg->rsp[2] != 0)
-		    && (msg->rsp[2] != IPMI_NODE_BUSY_ERR)
-		    && (msg->rsp[2] != IPMI_LOST_ARBITRATION_ERR)
-		    && (msg->rsp[2] != IPMI_BUS_ERR)
-		    && (msg->rsp[2] != IPMI_NAK_ON_WRITE_ERR)) {
-			int ch = msg->rsp[3] & 0xf;
-			struct ipmi_channel *chans;
-
-			/* Got an error sending the message, handle it. */
-
-			chans = READ_ONCE(intf->channel_list)->c;
-			if ((chans[ch].medium == IPMI_CHANNEL_MEDIUM_8023LAN)
-			    || (chans[ch].medium == IPMI_CHANNEL_MEDIUM_ASYNC))
-				ipmi_inc_stat(intf, sent_lan_command_errs);
-			else
-				ipmi_inc_stat(intf, sent_ipmb_command_errs);
-			intf_err_seq(intf, msg->msgid, msg->rsp[2]);
-		} else
-			/* The message was sent, start the timer. */
-			intf_start_seq_timer(intf, msg->msgid);
-free_msg:
-		requeue = 0;
-		goto out;
-
-	} else if (msg->rsp_size < 2) {
+	if (msg->rsp_size < 2) {
 		/* Message is too small to be correct. */
 		dev_warn(intf->si_dev,
 			 PFX "BMC returned to small a message for netfn %x cmd %x, got %d bytes\n",
@@ -4525,6 +4447,8 @@ static void smi_recv_tasklet(unsigned long val)
 		}
 	}
 
+	smi_tell_to_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES, newmsg);
+
 	if (!run_to_completion)
 		spin_unlock_irqrestore(&intf->xmit_msgs_lock, flags);
 	if (newmsg)
@@ -4542,16 +4466,62 @@ void ipmi_smi_msg_received(struct ipmi_smi *intf,
 	unsigned long flags = 0; /* keep us warning-free. */
 	int run_to_completion = intf->run_to_completion;
 
-	/*
-	 * To preserve message order, we keep a queue and deliver from
-	 * a tasklet.
-	 */
-	if (!run_to_completion)
-		spin_lock_irqsave(&intf->waiting_rcv_msgs_lock, flags);
-	list_add_tail(&msg->link, &intf->waiting_rcv_msgs);
-	if (!run_to_completion)
-		spin_unlock_irqrestore(&intf->waiting_rcv_msgs_lock,
-				       flags);
+	if ((msg->data_size >= 2)
+	    && (msg->data[0] == (IPMI_NETFN_APP_REQUEST << 2))
+	    && (msg->data[1] == IPMI_SEND_MSG_CMD)
+	    && (msg->user_data == NULL)) {
+
+		if (intf->in_shutdown)
+			goto free_msg;
+
+		/*
+		 * This is the local response to a command send, start
+		 * the timer for these.  The user_data will not be
+		 * NULL if this is a response send, and we will let
+		 * response sends just go through.
+		 */
+
+		/*
+		 * Check for errors, if we get certain errors (ones
+		 * that mean basically we can try again later), we
+		 * ignore them and start the timer.  Otherwise we
+		 * report the error immediately.
+		 */
+		if ((msg->rsp_size >= 3) && (msg->rsp[2] != 0)
+		    && (msg->rsp[2] != IPMI_NODE_BUSY_ERR)
+		    && (msg->rsp[2] != IPMI_LOST_ARBITRATION_ERR)
+		    && (msg->rsp[2] != IPMI_BUS_ERR)
+		    && (msg->rsp[2] != IPMI_NAK_ON_WRITE_ERR)) {
+			int ch = msg->rsp[3] & 0xf;
+			struct ipmi_channel *chans;
+
+			/* Got an error sending the message, handle it. */
+
+			chans = READ_ONCE(intf->channel_list)->c;
+			if ((chans[ch].medium == IPMI_CHANNEL_MEDIUM_8023LAN)
+			    || (chans[ch].medium == IPMI_CHANNEL_MEDIUM_ASYNC))
+				ipmi_inc_stat(intf, sent_lan_command_errs);
+			else
+				ipmi_inc_stat(intf, sent_ipmb_command_errs);
+			intf_err_seq(intf, msg->msgid, msg->rsp[2]);
+		} else
+			/* The message was sent, start the timer. */
+			intf_start_seq_timer(intf, msg->msgid);
+
+free_msg:
+		ipmi_free_smi_msg(msg);
+	} else {
+		/*
+		 * To preserve message order, we keep a queue and deliver from
+		 * a tasklet.
+		 */
+		if (!run_to_completion)
+			spin_lock_irqsave(&intf->waiting_rcv_msgs_lock, flags);
+		list_add_tail(&msg->link, &intf->waiting_rcv_msgs);
+		if (!run_to_completion)
+			spin_unlock_irqrestore(&intf->waiting_rcv_msgs_lock,
+					       flags);
+	}
 
 	if (!run_to_completion)
 		spin_lock_irqsave(&intf->xmit_msgs_lock, flags);
@@ -4606,7 +4576,7 @@ static void check_msg_timeout(struct ipmi_smi *intf, struct seq_table *ent,
 			      struct list_head *timeouts,
 			      unsigned long timeout_period,
 			      int slot, unsigned long *flags,
-			      bool *need_timer)
+			      unsigned int *watch_mask)
 {
 	struct ipmi_recv_msg *msg;
 
@@ -4618,14 +4588,13 @@ static void check_msg_timeout(struct ipmi_smi *intf, struct seq_table *ent,
 
 	if (timeout_period < ent->timeout) {
 		ent->timeout -= timeout_period;
-		*need_timer = true;
+		*watch_mask |= IPMI_WATCH_MASK_CHECK_MESSAGES;
 		return;
 	}
 
 	if (ent->retries_left == 0) {
 		/* The message has used all its retries. */
 		ent->inuse = 0;
-		smi_remove_watch(intf, IPMI_WATCH_MASK_CHECK_MESSAGES);
 		msg = ent->recv_msg;
 		list_add_tail(&msg->link, timeouts);
 		if (ent->broadcast)
@@ -4638,7 +4607,7 @@ static void check_msg_timeout(struct ipmi_smi *intf, struct seq_table *ent,
 		struct ipmi_smi_msg *smi_msg;
 		/* More retries, send again. */
 
-		*need_timer = true;
+		*watch_mask |= IPMI_WATCH_MASK_CHECK_MESSAGES;
 
 		/*
 		 * Start with the max timer, set to normal timer after
@@ -4683,20 +4652,20 @@ static void check_msg_timeout(struct ipmi_smi *intf, struct seq_table *ent,
 	}
 }
 
-static bool ipmi_timeout_handler(struct ipmi_smi *intf,
-				 unsigned long timeout_period)
+static unsigned int ipmi_timeout_handler(struct ipmi_smi *intf,
+					 unsigned long timeout_period)
 {
 	struct list_head     timeouts;
 	struct ipmi_recv_msg *msg, *msg2;
 	unsigned long        flags;
 	int                  i;
-	bool                 need_timer = false;
+	unsigned int         watch_mask = 0;
 
 	if (!intf->bmc_registered) {
 		kref_get(&intf->refcount);
 		if (!schedule_work(&intf->bmc_reg_work)) {
 			kref_put(&intf->refcount, intf_free);
-			need_timer = true;
+			watch_mask |= IPMI_WATCH_MASK_INTERNAL;
 		}
 	}
 
@@ -4716,7 +4685,7 @@ static bool ipmi_timeout_handler(struct ipmi_smi *intf,
 	for (i = 0; i < IPMI_IPMB_NUM_SEQ; i++)
 		check_msg_timeout(intf, &intf->seq_table[i],
 				  &timeouts, timeout_period, i,
-				  &flags, &need_timer);
+				  &flags, &watch_mask);
 	spin_unlock_irqrestore(&intf->seq_lock, flags);
 
 	list_for_each_entry_safe(msg, msg2, &timeouts, link)
@@ -4747,7 +4716,7 @@ static bool ipmi_timeout_handler(struct ipmi_smi *intf,
 
 	tasklet_schedule(&intf->recv_tasklet);
 
-	return need_timer;
+	return watch_mask;
 }
 
 static void ipmi_request_event(struct ipmi_smi *intf)
@@ -4767,8 +4736,9 @@ static atomic_t stop_operation;
 static void ipmi_timeout(struct timer_list *unused)
 {
 	struct ipmi_smi *intf;
-	bool need_timer = false;
+	unsigned int watch_mask = 0;
 	int index;
+	unsigned long flags;
 
 	if (atomic_read(&stop_operation))
 		return;
@@ -4781,14 +4751,28 @@ static void ipmi_timeout(struct timer_list *unused)
 				ipmi_request_event(intf);
 				intf->ticks_to_req_ev = IPMI_REQUEST_EV_TIME;
 			}
-			need_timer = true;
+			watch_mask |= IPMI_WATCH_MASK_INTERNAL;
 		}
 
-		need_timer |= ipmi_timeout_handler(intf, IPMI_TIMEOUT_TIME);
+		if (atomic_read(&intf->watchdog_waiters))
+			watch_mask |= IPMI_WATCH_MASK_CHECK_WATCHDOG;
+
+		if (atomic_read(&intf->command_waiters))
+			watch_mask |= IPMI_WATCH_MASK_CHECK_COMMANDS;
+
+		watch_mask |= ipmi_timeout_handler(intf, IPMI_TIMEOUT_TIME);
+
+		spin_lock_irqsave(&intf->xmit_msgs_lock, flags);
+		if (watch_mask != intf->last_watch_mask &&
+					intf->handlers->set_need_watch)
+			intf->handlers->set_need_watch(intf->send_info,
+						       watch_mask);
+		intf->last_watch_mask = watch_mask;
+		spin_unlock_irqrestore(&intf->xmit_msgs_lock, flags);
 	}
 	srcu_read_unlock(&ipmi_interfaces_srcu, index);
 
-	if (need_timer)
+	if (watch_mask)
 		mod_timer(&ipmi_timer, jiffies + IPMI_TIMEOUT_JIFFIES);
 }
 

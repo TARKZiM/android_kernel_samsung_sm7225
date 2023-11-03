@@ -1912,7 +1912,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0) {
-		ret = host->irq;
+		ret = -EINVAL;
 		goto host_free;
 	}
 
