@@ -218,9 +218,6 @@ static void rxe_qp_init_misc(struct rxe_dev *rxe, struct rxe_qp *qp,
 	spin_lock_init(&qp->rq.producer_lock);
 	spin_lock_init(&qp->rq.consumer_lock);
 
-	skb_queue_head_init(&qp->req_pkts);
-	skb_queue_head_init(&qp->resp_pkts);
-
 	atomic_set(&qp->ssn, 0);
 	atomic_set(&qp->skb_out, 0);
 }
@@ -269,8 +266,12 @@ static int rxe_qp_init_req(struct rxe_dev *rxe, struct rxe_qp *qp,
 	qp->req.opcode		= -1;
 	qp->comp.opcode		= -1;
 
-	rxe_init_task(&qp->req.task, qp, rxe_requester);
-	rxe_init_task(&qp->comp.task, qp, rxe_completer);
+	skb_queue_head_init(&qp->req_pkts);
+
+	rxe_init_task(rxe, &qp->req.task, qp,
+		      rxe_requester, "req");
+	rxe_init_task(rxe, &qp->comp.task, qp,
+		      rxe_completer, "comp");
 
 	qp->qp_timeout_jiffies = 0; /* Can't be set for UD/UC in modify_qp */
 	if (init->qp_type == IB_QPT_RC) {
@@ -314,7 +315,10 @@ static int rxe_qp_init_resp(struct rxe_dev *rxe, struct rxe_qp *qp,
 		}
 	}
 
-	rxe_init_task(&qp->resp.task, qp, rxe_responder);
+	skb_queue_head_init(&qp->resp_pkts);
+
+	rxe_init_task(rxe, &qp->resp.task, qp,
+		      rxe_responder, "resp");
 
 	qp->resp.opcode		= OPCODE_NONE;
 	qp->resp.msn		= 0;
