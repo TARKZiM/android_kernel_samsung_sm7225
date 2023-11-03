@@ -581,12 +581,10 @@ static int sprd_i2c_remove(struct platform_device *pdev)
 
 	ret = pm_runtime_get_sync(i2c_dev->dev);
 	if (ret < 0)
-		dev_err(&pdev->dev, "Failed to resume device (%pe)\n", ERR_PTR(ret));
+		return ret;
 
 	i2c_del_adapter(&i2c_dev->adap);
-
-	if (ret >= 0)
-		clk_disable_unprepare(i2c_dev->clk);
+	clk_disable_unprepare(i2c_dev->clk);
 
 	pm_runtime_put_noidle(i2c_dev->dev);
 	pm_runtime_disable(i2c_dev->dev);

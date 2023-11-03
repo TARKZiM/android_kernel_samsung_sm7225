@@ -590,11 +590,10 @@ static void process_packet_head_v4(struct psmouse *psmouse)
 	struct input_dev *dev = psmouse->dev;
 	struct elantech_data *etd = psmouse->private;
 	unsigned char *packet = psmouse->packet;
-	int id;
+	int id = ((packet[3] & 0xe0) >> 5) - 1;
 	int pres, traces;
 
-	id = ((packet[3] & 0xe0) >> 5) - 1;
-	if (id < 0 || id >= ETP_MAX_FINGERS)
+	if (id < 0)
 		return;
 
 	etd->mt[id].x = ((packet[1] & 0x0f) << 8) | packet[2];
@@ -624,7 +623,7 @@ static void process_packet_motion_v4(struct psmouse *psmouse)
 	int id, sid;
 
 	id = ((packet[0] & 0xe0) >> 5) - 1;
-	if (id < 0 || id >= ETP_MAX_FINGERS)
+	if (id < 0)
 		return;
 
 	sid = ((packet[3] & 0xe0) >> 5) - 1;
@@ -645,7 +644,7 @@ static void process_packet_motion_v4(struct psmouse *psmouse)
 	input_report_abs(dev, ABS_MT_POSITION_X, etd->mt[id].x);
 	input_report_abs(dev, ABS_MT_POSITION_Y, etd->mt[id].y);
 
-	if (sid >= 0 && sid < ETP_MAX_FINGERS) {
+	if (sid >= 0) {
 		etd->mt[sid].x += delta_x2 * weight;
 		etd->mt[sid].y -= delta_y2 * weight;
 		input_mt_slot(dev, sid);
