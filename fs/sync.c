@@ -22,7 +22,7 @@
 #define VALID_FLAGS (SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE| \
 			SYNC_FILE_RANGE_WAIT_AFTER)
 
-static inline int sec_sys_sync() {
+static inline int sec_sys_sync(void) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
 	ksys_sync();
 	return 0;
