@@ -1981,8 +1981,8 @@ static void __migrate_hrtimers(unsigned int scpu, bool remove_pinned)
 	 * The caller is globally serialized and nobody else
 	 * takes two locks at once, deadlock is not possible.
 	 */
-	raw_spin_lock(&new_base->lock);
-	raw_spin_lock_nested(&old_base->lock, SINGLE_DEPTH_NESTING);
+	raw_spin_lock(&old_base->lock);
+	raw_spin_lock_nested(&new_base->lock, SINGLE_DEPTH_NESTING);
 
 	for (i = 0; i < HRTIMER_MAX_CLOCK_BASES; i++) {
 		migrate_hrtimer_list(&old_base->clock_base[i],
@@ -1993,21 +1993,21 @@ static void __migrate_hrtimers(unsigned int scpu, bool remove_pinned)
 	 * The migration might have changed the first expiring softirq
 	 * timer on this CPU. Update it.
 	 */
-	hrtimer_update_softirq_timer(new_base, false);
+	__hrtimer_get_next_event(new_base, HRTIMER_ACTIVE_SOFT);
+	/* Tell the other CPU to retrigger the next event */
+	smp_call_function_single(ncpu, retrigger_next_event, NULL, 0);
 
-	raw_spin_unlock(&old_base->lock);
 	raw_spin_unlock(&new_base->lock);
+	raw_spin_unlock(&old_base->lock);
 
 	/* Check, if we got expired work to do */
 	__hrtimer_peek_ahead_timers();
 	local_irq_restore(flags);
 }
 
-int hrtimers_dead_cpu(unsigned int scpu)
+int hrtimers_cpu_dying(unsigned int dying_cpu)
 {
-	BUG_ON(cpu_online(scpu));
-	save_pcpu_tick(scpu);
-	tick_cancel_sched_timer(scpu);
+	tick_cancel_sched_timer(dying_cpu);
 
 	/*
 	 * this BH disable ensures that raise_softirq_irqoff() does
@@ -2015,7 +2015,7 @@ int hrtimers_dead_cpu(unsigned int scpu)
 	 * holding the cpu_base lock
 	 */
 	local_bh_disable();
-	__migrate_hrtimers(scpu, true);
+	__migrate_hrtimers(dying_cpu, true);
 	local_bh_enable();
 	return 0;
 }
