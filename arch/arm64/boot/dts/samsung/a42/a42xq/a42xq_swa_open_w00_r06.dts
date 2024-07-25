@@ -6012,7 +6012,6 @@
 				zinitix,mis_cal_check;
 				zinitix,factory_item_version = <0x0>;
 				support_ear_detect_mode;
-				support_dex_mode;
 				zinitix,tclm_level = <0x2>;
 				zinitix,afe_base = <0x10>;
 				zinitix,ss_touch_num = <0x1>;
