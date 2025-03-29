@@ -47,7 +47,7 @@
 #define __must_be_array(a) BUILD_BUG_ON_ZERO(__same_type((a), &(a)[0]))
 
 #ifdef CONFIG_CFI_CLANG
-#define __nocfi		__attribute__((no_sanitize("cfi")))
+#define __nocfi		__attribute__((__no_sanitize__("cfi")))
 #endif
 
 #ifdef CONFIG_LTO_CLANG
