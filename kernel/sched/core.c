@@ -4513,69 +4513,6 @@ asmlinkage __visible void __sched notrace preempt_schedule_notrace(void)
 }
 EXPORT_SYMBOL_GPL(preempt_schedule_notrace);
 
-#endif /* CONFIG_PREEMPT */
-
-/*
- * this is the entry point to schedule() from kernel preemption
- * off of irq context.
- * Note, that this is called and return with irqs disabled. This will
- * protect us against recursive calling from irq.
- */
-asmlinkage __visible void __sched preempt_schedule_irq(void)
-{
-	enum ctx_state prev_state;
-
-	/* Catch callers which need to be fixed */
-	BUG_ON(preempt_count() || !irqs_disabled());
-
-	prev_state = exception_enter();
-
-	do {
-		preempt_disable();
-		local_irq_enable();
-		__schedule(true);
-		local_irq_disable();
-		sched_preempt_enable_no_resched();
-	} while (need_resched());
-
-	exception_exit(prev_state);
-}
-
-int default_wake_function(wait_queue_entry_t *curr, unsigned mode, int wake_flags,
-			  void *key)
-{
-	return try_to_wake_up(curr->private, mode, wake_flags, 1);
-}
-EXPORT_SYMBOL(default_wake_function);
-
-#ifdef CONFIG_RT_MUTEXES
-
-static inline int __rt_effective_prio(struct task_struct *pi_task, int prio)
-{
-	if (pi_task)
-		prio = min(prio, pi_task->prio);
-
-	return prio;
-}
-
-static inline int rt_effective_prio(struct task_struct *p, int prio)
-{
-	struct task_struct *pi_task = rt_mutex_get_top_task(p);
-
-	return __rt_effective_prio(pi_task, prio);
-}
-
-/*
- * rt_mutex_setprio - set the current priority of a task
- * @p: task to boost
- * @pi_task: donor task
- *
- * This function changes the 'effective' priority of a task. It does
- * not touch ->normal_prio like __setscheduler().
- *
- * Used by the rt_mutex code to implement priority inheritance
- * logic. Call site only calls if the priority of the task changed.
- */
 void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 {
 	int prio, oldprio, queued, running, queue_flag =
@@ -4595,16 +4532,7 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 
 	rq = __task_rq_lock(p, &rf);
 	update_rq_clock(rq);
-	/*
-	 * Set under pi_lock && rq->lock, such that the value can be used under
-	 * either lock.
-	 *
-	 * Note that there is loads of tricky to make this pointer cache work
-	 * right. rt_mutex_slowunlock()+rt_mutex_postunlock() work together to
-	 * ensure a task is de-boosted (pi_task is set to NULL) before the
-	 * task is allowed to run again (and can exit). This ensures the pointer
-	 * points to a blocked task -- which guaratees the task is present.
-	 */
+
 	p->pi_top_task = pi_task;
 
 	/*
@@ -4612,6 +4540,71 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 */
 	if (prio == p->prio && !dl_prio(prio))
 		goto out_unlock;
+
+	/*
+	 * Idle task boosting is a nono in general. There is one
+	 * exception, when PREEMPT_RT and NOHZ is active:
+	 */
+	if (unlikely(p == rq->idle)) {
+		WARN_ON(p != rq->curr);
+		WARN_ON(p->pi_blocked_on);
+		goto out_unlock;
+	}
+
+	trace_sched_pi_setprio(p, pi_task);
+	oldprio = p->prio;
+
+	if (oldprio == prio)
+		queue_flag &= ~DEQUEUE_MOVE;
+
+	prev_class = p->sched_class;
+	queued = task_on_rq_queued(p);
+	running = task_current(rq, p);
+	if (queued)
+		dequeue_task(rq, p, queue_flag);
+	if (running)
+		put_prev_task(rq, p);
+
+	if (dl_prio(prio)) {
+		if (!dl_prio(p->normal_prio) ||
+		    (pi_task && dl_prio(pi_task->prio) &&
+		     dl_entity_preempt(&pi_task->dl, &p->dl))) {
+			p->dl.pi_se = pi_task->dl.pi_se;
+			queue_flag |= ENQUEUE_REPLENISH;
+		} else {
+			p->dl.pi_se = &p->dl;
+		}
+		p->sched_class = &dl_sched_class;
+	} else if (rt_prio(prio)) {
+		if (dl_prio(oldprio))
+			p->dl.pi_se = &p->dl;
+		if (oldprio < prio)
+			queue_flag |= ENQUEUE_HEAD;
+		p->sched_class = &rt_sched_class;
+	} else {
+		if (dl_prio(oldprio))
+			p->dl.pi_se = &p->dl;
+		if (rt_prio(oldprio))
+			p->rt.timeout = 0;
+		p->sched_class = &fair_sched_class;
+	}
+
+	p->prio = prio;
+
+	if (queued)
+		enqueue_task(rq, p, queue_flag);
+	if (running)
+		set_curr_task(rq, p);
+
+	check_class_changed(rq, p, prev_class, oldprio);
+out_unlock:
+	/* Avoid rq from going away on us: */
+	preempt_disable();
+	__task_rq_unlock(rq, &rf);
+
+	balance_callback(rq);
+	preempt_enable();
+}
 
 	/*
 	 * Idle task boosting is a nono in general. There is one
