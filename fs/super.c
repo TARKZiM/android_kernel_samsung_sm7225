@@ -20,7 +20,7 @@
  *  Added devfs support: Richard Gooch <rgooch@atnf.csiro.au>, 13-JAN-1998
  *  Heavily rewritten for 'one fs - one tree' dcache architecture. AV, Mar 2000
  */
-
+#include <linux/magic.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>

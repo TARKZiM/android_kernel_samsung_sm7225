@@ -36,7 +36,7 @@ DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 unsigned long get_max_fps_util(int group_id);
 #endif /* CONFIG_FPS */
 
-#ifdef CONFIG_SCHED_DEBUG
+#if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_JUMP_LABEL)
 /*
  * Debugging: various feature bits
  *
@@ -2498,9 +2498,6 @@ out:
 
 bool cpus_share_cache(int this_cpu, int that_cpu)
 {
-	if (this_cpu == that_cpu)
-		return true;
-
 	return per_cpu(sd_llc_id, this_cpu) == per_cpu(sd_llc_id, that_cpu);
 }
 #endif /* CONFIG_SMP */
@@ -4653,26 +4650,21 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 *          running task
 	 */
 	if (dl_prio(prio)) {
-		if (!dl_prio(p->normal_prio) ||
-		    (pi_task && dl_prio(pi_task->prio) &&
-		     dl_entity_preempt(&pi_task->dl, &p->dl))) {
-			p->dl.dl_boosted = 1;
-			queue_flag |= ENQUEUE_REPLENISH;
-		} else
-			p->dl.dl_boosted = 0;
-		p->sched_class = &dl_sched_class;
-	} else if (rt_prio(prio)) {
-		if (dl_prio(oldprio))
-			p->dl.dl_boosted = 0;
-		if (oldprio < prio)
-			queue_flag |= ENQUEUE_HEAD;
-		p->sched_class = &rt_sched_class;
-	} else {
-		if (dl_prio(oldprio))
-			p->dl.dl_boosted = 0;
-		if (rt_prio(oldprio))
-			p->rt.timeout = 0;
-		p->sched_class = &fair_sched_class;
+    if (!dl_prio(p->normal_prio) ||
+        (pi_task && dl_prio(pi_task->prio) &&
+         dl_entity_preempt(&pi_task->dl, &p->dl))) {
+        queue_flag |= ENQUEUE_REPLENISH;
+    }
+    p->sched_class = &dl_sched_class;
+} else if (rt_prio(prio)) {
+    if (oldprio < prio)
+        queue_flag |= ENQUEUE_HEAD;
+    p->sched_class = &rt_sched_class;
+} else {
+    if (rt_prio(oldprio))
+        p->rt.timeout = 0;
+    p->sched_class = &fair_sched_class;
+}
 	}
 
 	p->prio = prio;
@@ -5893,8 +5885,12 @@ static void do_sched_yield(void)
 	schedstat_inc(rq->yld_count);
 	current->sched_class->yield_task(rq);
 
+	/*
+	 * Since we are going to call schedule() anyway, there's
+	 * no need to preempt or enable interrupts:
+	 */
 	preempt_disable();
-	rq_unlock_irq(rq, &rf);
+	rq_unlock(rq, &rf);
 	sched_preempt_enable_no_resched();
 
 	schedule();
@@ -6871,8 +6867,8 @@ int sched_unisolate_cpu_unlocked(int cpu)
 		stop_cpus(cpumask_of(cpu), do_unisolation_work_cpu_stop, 0);
 
 		/* Kick CPU to immediately do load balancing */
-		if (!atomic_fetch_or(NOHZ_KICK_MASK, nohz_flags(cpu)))
-			smp_send_reschedule(cpu);
+             smp_send_reschedule(cpu);
+}
 	}
 
 out:

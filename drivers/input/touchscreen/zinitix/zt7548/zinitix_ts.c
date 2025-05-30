@@ -1715,17 +1715,9 @@ static void zt_ts_fod_event_report(struct zt_ts_info *info, struct point_info to
 			| ((touch_info.byte04.value_u8bit & 0xF0) >> 4);
 		info->scrub_y = ((touch_info.byte03.value_u8bit << 4) & 0xFF0)
 			| ((touch_info.byte04.value_u8bit & 0x0F));
-
-		input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
-		input_sync(info->input_dev);
-		input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
-		input_sync(info->input_dev);
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 		input_info(true, &info->client->dev, "%s: FOD %s PRESS: %d\n", __func__,
 				touch_info.byte01.value_u8bit ? "NORMAL" : "LONG", info->scrub_id);
-		input_report_key(info->input_dev, KEY_WAKEUP, 1);
-		input_sync(info->input_dev);
-		input_report_key(info->input_dev, KEY_WAKEUP, 0);
 #else
 		input_info(true, &info->client->dev, "%s: FOD %s PRESS: %d, %d, %d\n", __func__,
 				touch_info.byte01.value_u8bit ? "NORMAL" : "LONG",
@@ -1738,11 +1730,6 @@ static void zt_ts_fod_event_report(struct zt_ts_info *info, struct point_info to
 			| ((touch_info.byte04.value_u8bit & 0xF0) >> 4);
 		info->scrub_y = ((touch_info.byte03.value_u8bit << 4) & 0xFF0)
 			| ((touch_info.byte04.value_u8bit & 0x0F));
-
-		input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
-		input_sync(info->input_dev);
-		input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
-		input_sync(info->input_dev);
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 		input_info(true, &info->client->dev, "%s: FOD RELEASE: %d\n", __func__, info->scrub_id);
 #else
@@ -1756,11 +1743,6 @@ static void zt_ts_fod_event_report(struct zt_ts_info *info, struct point_info to
 			| ((touch_info.byte04.value_u8bit & 0xF0) >> 4);
 		info->scrub_y = ((touch_info.byte03.value_u8bit << 4) & 0xFF0)
 			| ((touch_info.byte04.value_u8bit & 0x0F));
-
-		input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
-		input_sync(info->input_dev);
-		input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
-		input_sync(info->input_dev);
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 		input_info(true, &info->client->dev, "%s: FOD OUT: %d\n", __func__, info->scrub_id);
 #else
