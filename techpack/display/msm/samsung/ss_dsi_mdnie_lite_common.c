@@ -676,7 +676,7 @@ static ssize_t sensorRGB_store(struct device *dev,
 		tune->scr_white_green = (char)white_green;
 		tune->scr_white_blue = (char)white_blue;
 
-		DPRINT(vdd, "[mDNIe] %s: white_red = %d, white_green = %d, white_blue = %d, %d %d\n",
+		DPRINT("[mDNIe] %s: white_red = %d, white_green = %d, white_blue = %d, %d %d\n",
 			__func__,
 			white_red, white_green, white_blue,
 			mdnie_data->dsi_rgb_sensor_mdnie_1_size,
@@ -1451,7 +1451,7 @@ void create_tcon_mdnie_node(struct samsung_display_driver_data *vdd)
 
 	/* MODE MAX */
 	if (device_create_file(tune_mdnie_dev, &dev_attr_mode_max) < 0)
-		DPRINT(vdd, "[mDNIe] Failed to create device file(%s)!\n", dev_attr_mode_max.attr.name);
+		DPRINT("[mDNIe] Failed to create device file(%s)!\n", dev_attr_mode_max.attr.name);
 
 	/* OUTDOOR */
 	if (device_create_file(tune_mdnie_dev, &dev_attr_outdoor) < 0)
