@@ -1424,25 +1424,6 @@ int timer_delete_sync(struct timer_list *timer)
 	lock_map_release(&timer->lockdep_map);
 	local_irq_restore(flags);
 #endif
-	/*
-	 * don't use it in hardirq context, because it
-	 * could lead to deadlock.
-	 */
-	WARN_ON(in_irq() && !(timer->flags & TIMER_IRQSAFE));
-
-	do {
-		ret = try_to_del_timer_sync(timer);
-
-		if (unlikely(ret < 0)) {
-			del_timer_wait_running(timer);
-			cpu_relax();
-		}
-	} while (ret < 0);
-
-	return ret;
-}
-EXPORT_SYMBOL(del_timer_sync);
-#endif
 
 	do {
 		ret = try_to_del_timer_sync(timer);

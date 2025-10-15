@@ -1998,7 +1998,7 @@ static void __migrate_hrtimers(unsigned int scpu, bool remove_pinned)
 	 */
 	__hrtimer_get_next_event(new_base, HRTIMER_ACTIVE_SOFT);
 	/* Tell the other CPU to retrigger the next event */
-	smp_call_function_single(ncpu, retrigger_next_event, NULL, 0);
+	smp_call_function_single(scpu, retrigger_next_event, NULL, 0);
 
 	raw_spin_unlock(&new_base->lock);
 	raw_spin_unlock(&old_base->lock);
