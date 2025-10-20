@@ -1010,51 +1010,31 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 		return ERR_PTR(-ENOMEM);
 
 	if (type->alloc_mnt_data) {
-#ifdef CONFIG_KDP_NS
-		kdp_set_ns_data(mnt->mnt, type->alloc_mnt_data());
-		if (!mnt->mnt->data) {
-#else
 		mnt->mnt.data = type->alloc_mnt_data();
 		if (!mnt->mnt.data) {
-#endif
 			mnt_free_id(mnt);
 			free_vfsmnt(mnt);
 			return ERR_PTR(-ENOMEM);
 		}
 	}
 	if (flags & SB_KERNMOUNT)
-#ifdef CONFIG_KDP_NS
-		kdp_set_mnt_flags(mnt->mnt, MNT_INTERNAL);
-
-	root = mount_fs(type, flags, name, mnt->mnt, data);
-#else
 		mnt->mnt.mnt_flags = MNT_INTERNAL;
 
 	root = mount_fs(type, flags, name, data);
-#endif
 	if (IS_ERR(root)) {
 		mnt_free_id(mnt);
 		free_vfsmnt(mnt);
 		return ERR_CAST(root);
 	}
 
-#ifdef CONFIG_KDP_NS
-	kdp_set_mnt_root_sb(mnt->mnt, root, root->d_sb);
-	mnt->mnt_mountpoint = mnt->mnt->mnt_root;
-#else
 	mnt->mnt.mnt_root = root;
 	mnt->mnt.mnt_sb = root->d_sb;
 	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
-#endif
 	mnt->mnt_parent = mnt;
 	lock_mount_hash();
 	list_add_tail(&mnt->mnt_instance, &root->d_sb->s_mounts);
 	unlock_mount_hash();
-#ifdef CONFIG_KDP_NS
-	return mnt->mnt;
-#else
 	return &mnt->mnt;
-#endif
 }
 EXPORT_SYMBOL_GPL(vfs_kern_mount);
 
@@ -1085,13 +1065,8 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 		return ERR_PTR(-ENOMEM);
 
 	if (sb->s_op->clone_mnt_data) {
-#ifdef CONFIG_KDP_NS
-		kdp_set_ns_data(mnt->mnt, sb->s_op->clone_mnt_data(old->mnt->data));
-		if (!mnt->mnt->data) {
-#else
 		mnt->mnt.data = sb->s_op->clone_mnt_data(old->mnt.data);
 		if (!mnt->mnt.data) {
-#endif
 			err = -ENOMEM;
 			goto out_free;
 		}
@@ -2389,28 +2364,6 @@ static int do_remount(struct path *path, int ms_flags, int sb_flags,
 	 * MNT_LOCK flags because those flags can never be cleared
 	 * once they are set.
 	 */
-#ifdef CONFIG_KDP_NS
-	if ((mnt->mnt->mnt_flags & MNT_LOCK_READONLY) &&
-	    !(mnt_flags & MNT_READONLY)) {
-		return -EPERM;
-	}
-	if ((mnt->mnt->mnt_flags & MNT_LOCK_NODEV) &&
-	    !(mnt_flags & MNT_NODEV)) {
-		return -EPERM;
-	}
-	if ((mnt->mnt->mnt_flags & MNT_LOCK_NOSUID) &&
-	    !(mnt_flags & MNT_NOSUID)) {
-		return -EPERM;
-	}
-	if ((mnt->mnt->mnt_flags & MNT_LOCK_NOEXEC) &&
-	    !(mnt_flags & MNT_NOEXEC)) {
-		return -EPERM;
-	}
-	if ((mnt->mnt->mnt_flags & MNT_LOCK_ATIME) &&
-	    ((mnt->mnt->mnt_flags & MNT_ATIME_MASK) != (mnt_flags & MNT_ATIME_MASK))) {
-		return -EPERM;
-	}
-#else
 	if ((mnt->mnt.mnt_flags & MNT_LOCK_READONLY) &&
 	    !(mnt_flags & MNT_READONLY)) {
 		return -EPERM;
@@ -2431,7 +2384,6 @@ static int do_remount(struct path *path, int ms_flags, int sb_flags,
 	    ((mnt->mnt.mnt_flags & MNT_ATIME_MASK) != (mnt_flags & MNT_ATIME_MASK))) {
 		return -EPERM;
 	}
-#endif
 	err = security_sb_remount(sb, data);
 	if (err)
 		return err;
@@ -2451,13 +2403,8 @@ static int do_remount(struct path *path, int ms_flags, int sb_flags,
 	}
 	if (!err) {
 		lock_mount_hash();
-#ifdef CONFIG_KDP_NS
-		mnt_flags |= mnt->mnt->mnt_flags & ~MNT_USER_SETTABLE_MASK;
-		kdp_assign_mnt_flags(mnt->mnt, mnt_flags);
-#else
 		mnt_flags |= mnt->mnt.mnt_flags & ~MNT_USER_SETTABLE_MASK;
 		mnt->mnt.mnt_flags = mnt_flags;
-#endif
 		touch_mnt_namespace(mnt->mnt_ns);
 		unlock_mount_hash();
 	}
