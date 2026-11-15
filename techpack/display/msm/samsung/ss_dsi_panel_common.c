@@ -2964,6 +2964,8 @@ int ss_panel_off_post(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO("[DISPLAY_%d] +\n", vdd->ndx);
 
+	cancel_delayed_work(&vdd->finger_mask_work);
+
 	if (vdd->finger_mask)
 		vdd->finger_mask = 0;
 
@@ -5791,6 +5793,24 @@ bool is_hbm_level(struct samsung_display_driver_data *vdd)
 	return true;
 }
 
+/* A missed UDFPS HBM-off event would leave normal brightness updates ignored. */
+static void ss_finger_mask_work(struct work_struct *work)
+{
+	struct samsung_display_driver_data *vdd =
+		container_of(work, struct samsung_display_driver_data,
+				finger_mask_work.work);
+
+	mutex_lock(&vdd->bl_lock);
+	if (vdd->br_info.common_br.finger_mask_hbm_on) {
+		vdd->br_info.common_br.finger_mask_hbm_on = false;
+		vdd->finger_mask = 0;
+		vdd->br_info.common_br.finger_mask_bl_level = 0;
+		vdd->finger_mask_updated = true;
+		LCD_INFO("[FINGER_MASK] HBM watchdog expired, clearing mask state");
+	}
+	mutex_unlock(&vdd->bl_lock);
+}
+
 /* ss_brightness_dcs() is called not in locking status.
  * Instead, calls ss_set_backlight() when you need to controll backlight
  * in locking status.
@@ -5803,6 +5823,13 @@ int ss_brightness_dcs(struct samsung_display_driver_data *vdd, int level, int ba
 	struct dsi_panel_cmd_set *brightness_cmds = NULL;
 	struct dsi_panel *panel = GET_DSI_PANEL(vdd);
 	static int backup_bl_level, backup_acl;
+
+	/* Bound UDFPS HBM so a missed off event can not pin the panel at max. */
+	if (backlight_origin == BACKLIGHT_FINGERMASK_ON ||
+			backlight_origin == BACKLIGHT_FINGERMASK_ON_SUSTAIN)
+		schedule_delayed_work(&vdd->finger_mask_work, msecs_to_jiffies(5000));
+	else if (backlight_origin == BACKLIGHT_FINGERMASK_OFF)
+		cancel_delayed_work(&vdd->finger_mask_work);
 
 	/* U project TEMP CODE
 	 * M,N,O project use gamma mode2 (level:0~255), but Y2 panel does not use gamma mode 2.
@@ -7266,6 +7293,8 @@ void ss_panel_init(struct dsi_panel *panel)
 	init_waitqueue_head(&vdd->exclusive_tx.ex_tx_waitq);
 	atomic_set(&vdd->ss_vsync_cnt, 0);
 	init_waitqueue_head(&vdd->ss_vync_wq);
+
+	INIT_DELAYED_WORK(&vdd->finger_mask_work, ss_finger_mask_work);
 
 	ss_create_sysfs(vdd);
 
