@@ -1750,6 +1750,12 @@ static void zt_ts_fod_event_report(struct zt_ts_info *info, struct point_info to
 				__func__, info->scrub_id, info->scrub_x, info->scrub_y);
 #endif
 	}
+	/* The AOD UDFPS sensor (org.lineageos.sensor.udfps) polls this node and
+	 * only wakes on a notification. Without it a finger on the sensor was
+	 * ignored whenever the panel was off, until the screen came back on.
+	 */
+	if (info->scrub_id)
+		sysfs_notify(&info->sec.fac_dev->kobj, NULL, "scrub_pos");
 }
 
 static bool ts_read_coord(struct zt_ts_info *info)
