@@ -2845,6 +2845,18 @@ int ss_panel_on_post(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO("[DISPLAY_%d] +\n", vdd->ndx);
 
+	/* An unlock can finish while the finger-mask HBM is still on: the off
+	 * event never arrives because the gesture ends in panel on, and every
+	 * normal brightness update is then ignored. Clear the mask here.
+	 */
+	cancel_delayed_work(&vdd->finger_mask_work);
+	if (vdd->br_info.common_br.finger_mask_hbm_on) {
+		vdd->br_info.common_br.finger_mask_hbm_on = false;
+		vdd->br_info.common_br.finger_mask_bl_level = 0;
+		vdd->finger_mask = 0;
+		vdd->finger_mask_updated = true;
+	}
+
 	if (vdd->support_cabc && !vdd->br_info.is_hbm)
 		ss_cabc_update(vdd);
 	else if (vdd->br_info.ss_panel_tft_outdoormode_update && vdd->br_info.is_hbm)
