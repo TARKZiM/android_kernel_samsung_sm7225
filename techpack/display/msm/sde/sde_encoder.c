@@ -4161,24 +4161,22 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 	spin_unlock_irqrestore(&sde_enc->enc_spinlock, lock_flags);
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	if (sde_encoder_check_curr_mode(drm_enc, MSM_DISPLAY_VIDEO_MODE)
-		&& (sde_enc->crtc)) {
-		if (vdd) {
-			SDE_DEBUG("[FINGER MASK]mask state:%d updated:%d.....wait_cnt:%d\n",
-				 vdd->finger_mask, vdd->finger_mask_updated, wait_cnt);
+	/* Release only from what this call took. Re-checking the panel mode
+	 * here is racy: curr_panel_mode can change while the flush is in
+	 * flight, and skipping the release leaks the gate and ex_tx_lock.
+	 */
+	if (fingermask_exclusive) {
+		SDE_DEBUG("[FINGER MASK]mask state:%d updated:%d.....wait_cnt:%d\n",
+			 vdd->finger_mask, vdd->finger_mask_updated, wait_cnt);
 
-			/* If video mode, opt, fingermask off */
-			if (fingermask_exclusive) {
-				ss_brightness_dcs(vdd, 0, BACKLIGHT_FINGERMASK_OFF);
+		ss_brightness_dcs(vdd, 0, BACKLIGHT_FINGERMASK_OFF);
 
-				/* Exclusive unlock to prevent blink shot */
-				ss_set_exclusive_tx_packet(vdd, TX_BRIGHT_CTRL, 0);
-				vdd->exclusive_tx.enable = 0;
-				wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+		/* Exclusive unlock to prevent blink shot */
+		ss_set_exclusive_tx_packet(vdd, TX_BRIGHT_CTRL, 0);
+		vdd->exclusive_tx.enable = 0;
+		wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
 
-				mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
-			}
-		}
+		mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
 	}
 #endif
 
