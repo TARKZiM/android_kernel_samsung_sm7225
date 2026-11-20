@@ -773,8 +773,16 @@ static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
 			!set->exclusive_pass)) {
 		LCD_INFO("[SDE] %s: wait.. cmd[%d]=%s\n", __func__,
 				type, ss_get_cmd_name(type));
-		wait_event(vdd->exclusive_tx.ex_tx_waitq,
-				!vdd->exclusive_tx.enable);
+		/* Bounded so a leaked gate cannot park every command send
+		 * forever. 5 s covers the legitimate flash-gamma and MTP
+		 * holders; on expiry send anyway and leave the gate to its
+		 * owner.
+		 */
+		if (!wait_event_timeout(vdd->exclusive_tx.ex_tx_waitq,
+				!vdd->exclusive_tx.enable,
+				msecs_to_jiffies(5000)))
+			LCD_ERR("[SDE] %s: exclusive tx timeout, gate still held; sending cmd[%d]=%s\n",
+					__func__, type, ss_get_cmd_name(type));
 		LCD_INFO("[SDE] %s: pass, cmd[%d]=%s\n", __func__,
 				type, ss_get_cmd_name(type));
 	}
