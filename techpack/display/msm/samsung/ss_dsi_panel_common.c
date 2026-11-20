@@ -685,9 +685,16 @@ void ss_event_frame_update_pre(struct samsung_display_driver_data *vdd)
 					!vdd->exclusive_tx.enable,
 					msecs_to_jiffies(500))) {
 				LCD_ERR("exclusive mode timeout, force resume frame update\n");
-				vdd->exclusive_tx.enable = 0;
-				vdd->exclusive_tx.permit_frame_update = 0;
-				wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+				/* Clear the gate only if no thread owns it. When the
+				 * trylock fails the gate is not stale; its owner still
+				 * has to release it.
+				 */
+				if (mutex_trylock(&vdd->exclusive_tx.ex_tx_lock)) {
+					vdd->exclusive_tx.enable = 0;
+					vdd->exclusive_tx.permit_frame_update = 0;
+					wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+					mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
+				}
 			}
 			LCD_INFO("continue frame update\n");
 		}
@@ -5826,10 +5833,16 @@ static void ss_finger_mask_work(struct work_struct *work)
 		vdd->finger_mask_updated = true;
 		LCD_INFO("[FINGER_MASK] HBM watchdog expired, clearing mask state");
 		if (vdd->exclusive_tx.enable) {
-			LCD_ERR("[FINGER_MASK] releasing stale exclusive tx gate\n");
-			vdd->exclusive_tx.enable = 0;
-			vdd->exclusive_tx.permit_frame_update = 0;
-			wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+			/* Leave the gate to its owner if one still holds it. */
+			if (mutex_trylock(&vdd->exclusive_tx.ex_tx_lock)) {
+				LCD_ERR("[FINGER_MASK] releasing stale exclusive tx gate\n");
+				vdd->exclusive_tx.enable = 0;
+				vdd->exclusive_tx.permit_frame_update = 0;
+				wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+				mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
+			} else {
+				LCD_ERR("[FINGER_MASK] exclusive tx busy, leaving gate alone\n");
+			}
 		}
 	}
 	mutex_unlock(&vdd->bl_lock);
