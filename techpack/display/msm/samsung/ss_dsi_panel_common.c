@@ -681,8 +681,14 @@ void ss_event_frame_update_pre(struct samsung_display_driver_data *vdd)
 	if (unlikely(vdd->exclusive_tx.enable)) {
 		if (unlikely(!vdd->exclusive_tx.permit_frame_update)) {
 			LCD_INFO("exclusive mode on, stop frame update\n");
-			wait_event(vdd->exclusive_tx.ex_tx_waitq,
-				!vdd->exclusive_tx.enable);
+			if (!wait_event_timeout(vdd->exclusive_tx.ex_tx_waitq,
+					!vdd->exclusive_tx.enable,
+					msecs_to_jiffies(500))) {
+				LCD_ERR("exclusive mode timeout, force resume frame update\n");
+				vdd->exclusive_tx.enable = 0;
+				vdd->exclusive_tx.permit_frame_update = 0;
+				wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+			}
 			LCD_INFO("continue frame update\n");
 		}
 	}
@@ -5819,6 +5825,12 @@ static void ss_finger_mask_work(struct work_struct *work)
 		vdd->br_info.common_br.finger_mask_bl_level = 0;
 		vdd->finger_mask_updated = true;
 		LCD_INFO("[FINGER_MASK] HBM watchdog expired, clearing mask state");
+		if (vdd->exclusive_tx.enable) {
+			LCD_ERR("[FINGER_MASK] releasing stale exclusive tx gate\n");
+			vdd->exclusive_tx.enable = 0;
+			vdd->exclusive_tx.permit_frame_update = 0;
+			wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+		}
 	}
 	mutex_unlock(&vdd->bl_lock);
 }
