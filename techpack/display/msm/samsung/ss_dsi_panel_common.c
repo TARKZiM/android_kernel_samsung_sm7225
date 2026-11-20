@@ -6069,26 +6069,33 @@ int ss_brightness_dcs(struct samsung_display_driver_data *vdd, int level, int ba
 		/* sending tx cmds */
 		if (ret) {
 			if (vdd->need_brightness_lock) {
-				int locked = 0;
+				int acquired;
 				int wait_cnt = 1000; /* 1000 * 0.5ms = 500ms */
 
-				if(!mutex_trylock(&vdd->exclusive_tx.ex_tx_lock)) {
-					locked = 1;
-				}
-				vdd->exclusive_tx.enable = 1;
-				while (!list_empty(&vdd->cmd_lock.wait_list) && --wait_cnt)
-					usleep_range(500, 500);
+				acquired = mutex_trylock(&vdd->exclusive_tx.ex_tx_lock);
+				if (!acquired) {
+					/* Another thread owns the exclusive gate. Send the
+					 * brightness command without changing enable,
+					 * permit_frame_update or the exclusive pass flag:
+					 * clearing them here would end that thread's
+					 * exclusive window early.
+					 */
+					ss_send_cmd(vdd, TX_BRIGHT_CTRL);
+				} else {
+					vdd->exclusive_tx.enable = 1;
+					while (!list_empty(&vdd->cmd_lock.wait_list) && --wait_cnt)
+						usleep_range(500, 500);
 
-				vdd->exclusive_tx.permit_frame_update = 0;
-				ss_set_exclusive_tx_packet(vdd, TX_BRIGHT_CTRL, 1);
+					vdd->exclusive_tx.permit_frame_update = 0;
+					ss_set_exclusive_tx_packet(vdd, TX_BRIGHT_CTRL, 1);
 
-				ss_send_cmd(vdd, TX_BRIGHT_CTRL);
+					ss_send_cmd(vdd, TX_BRIGHT_CTRL);
 
-				ss_set_exclusive_tx_packet(vdd, TX_BRIGHT_CTRL, 0);
-				vdd->exclusive_tx.enable = 0;
-				wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
-				if(!locked)
+					ss_set_exclusive_tx_packet(vdd, TX_BRIGHT_CTRL, 0);
+					vdd->exclusive_tx.enable = 0;
+					wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
 					mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
+				}
 			} else {
 				LCD_INFO("tx bl cmd +\n");
 				ss_send_cmd(vdd, TX_BRIGHT_CTRL);
