@@ -4054,7 +4054,8 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 	int pend_ret_fence_cnt;
 	struct sde_connector *c_conn;
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	struct samsung_display_driver_data *vdd;
+	struct samsung_display_driver_data *vdd = NULL;
+	bool fingermask_exclusive = false;
 	int wait_cnt = 200; /* (200 * 0.5ms) * 2 = 200ms */
 #endif
 
@@ -4102,6 +4103,7 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 
 				/* Exclusive lock to prevent blink shot */
 				mutex_lock(&vdd->exclusive_tx.ex_tx_lock);
+				fingermask_exclusive = true;
 				vdd->exclusive_tx.enable = 1;
 
 				while (!list_empty(&vdd->cmd_lock.wait_list) && --wait_cnt)
@@ -4166,7 +4168,7 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 				 vdd->finger_mask, vdd->finger_mask_updated, wait_cnt);
 
 			/* If video mode, opt, fingermask off */
-			if (vdd->support_optical_fingerprint && vdd->finger_mask_updated && !vdd->finger_mask) {
+			if (fingermask_exclusive) {
 				ss_brightness_dcs(vdd, 0, BACKLIGHT_FINGERMASK_OFF);
 
 				/* Exclusive unlock to prevent blink shot */
